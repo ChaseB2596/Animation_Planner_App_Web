@@ -63,7 +63,7 @@ export default function LandingPage({ onLaunchDemo }: Props) {
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-lg shadow-blue-500/30">
             <Layers size={16} className="text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight">FrameFlow</span>
+          <span className="font-bold text-lg tracking-tight">Animation Planner</span>
         </div>
         <button
           onClick={onLaunchDemo}
@@ -142,8 +142,8 @@ export default function LandingPage({ onLaunchDemo }: Props) {
             className="relative rounded-2xl overflow-hidden border border-white/10 shadow-[0_32px_80px_rgba(0,0,0,0.6)] cursor-pointer group"
           >
             <img
-              src="/images/6.jpg"
-              alt="FrameFlow app interface"
+              src="/regenerated_image_1777330920029.png"
+              alt="Animation Planner preview"
               className="w-full object-cover group-hover:scale-[1.01] transition-transform duration-500"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -197,34 +197,6 @@ export default function LandingPage({ onLaunchDemo }: Props) {
         </div>
       </section>
 
-      {/* Screenshot gallery */}
-      <section className="relative z-10 py-16 px-8 md:px-16 max-w-6xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-4">
-            See it in action
-          </h2>
-          <p className="text-white/40 text-sm">Click any shot to launch the demo</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[1, 2, 3, 4, 5, 7].map((n) => (
-            <div
-              key={n}
-              onClick={onLaunchDemo}
-              className="group relative rounded-2xl overflow-hidden border border-white/8 cursor-pointer shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:shadow-[0_16px_48px_rgba(59,130,246,0.2)] hover:-translate-y-1 transition-all duration-300"
-            >
-              <img
-                src={`/images/${n}.jpg`}
-                alt={`App screenshot ${n}`}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                <span className="text-xs font-bold text-white/70 uppercase tracking-widest">Open Demo</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* Waitlist CTA */}
       <section className="relative z-10 py-28 px-8 flex flex-col items-center text-center">
         <div className="absolute inset-0 pointer-events-none">
@@ -233,12 +205,9 @@ export default function LandingPage({ onLaunchDemo }: Props) {
         <div className="relative w-full max-w-2xl">
           <div className="p-12 rounded-3xl border border-white/8 bg-white/[0.03] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop-blur-sm">
             <p className="text-blue-400 text-xs font-bold uppercase tracking-[0.25em] mb-4">Early Access</p>
-            <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
-              Be first in line
+            <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-10">
+              Would you want this
             </h2>
-            <p className="text-white/45 mb-10 leading-relaxed">
-              FrameFlow is coming soon as a full production app. Join the waitlist and we'll notify you the moment it launches.
-            </p>
 
             <AnimatePresence mode="wait">
               {submitted ? (
@@ -286,14 +255,7 @@ export default function LandingPage({ onLaunchDemo }: Props) {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 py-10 px-8 md:px-16 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-white/20">
-          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
-            <Layers size={12} className="text-white" />
-          </div>
-          <span className="text-sm font-semibold">FrameFlow</span>
-        </div>
-        <p className="text-white/20 text-xs">© {new Date().getFullYear()} FrameFlow. All rights reserved.</p>
+      <footer className="relative z-10 py-10 px-8 md:px-16 border-t border-white/5 flex items-center justify-center">
         <button
           onClick={onLaunchDemo}
           className="text-blue-400 hover:text-blue-300 text-xs font-semibold transition-colors"
