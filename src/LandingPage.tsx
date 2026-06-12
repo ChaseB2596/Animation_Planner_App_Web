@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Layers, Calendar, PieChart, Network, ThumbsUp, ThumbsDown } from 'lucide-react';
+import React from 'react';
+import { motion } from 'motion/react';
+import { ArrowRight, Layers, Calendar, PieChart, Network } from 'lucide-react';
 
 interface Props {
   onLaunchDemo: () => void;
@@ -30,14 +30,6 @@ const features = [
 ];
 
 export default function LandingPage({ onLaunchDemo }: Props) {
-  const [yesCount, setYesCount] = useState(0);
-  const [voted, setVoted] = useState<'yes' | 'no' | null>(null);
-
-  const handleVote = (vote: 'yes' | 'no') => {
-    if (voted) return;
-    setVoted(vote);
-    if (vote === 'yes') setYesCount(c => c + 1);
-  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-['Inter',sans-serif] overflow-x-hidden">
@@ -124,8 +116,8 @@ export default function LandingPage({ onLaunchDemo }: Props) {
                 className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-[0_20px_60px_rgba(0,0,0,0.12)] cursor-pointer group"
               >
                 <img
-                  src="/regenerated_image_1777330920029.png"
-                  alt="Animation Planner preview"
+                  src="/app-preview.jpg"
+                  alt="Animation Planner app interface"
                   className="w-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-300 flex items-center justify-center">
@@ -165,65 +157,6 @@ export default function LandingPage({ onLaunchDemo }: Props) {
               <p className="text-slate-400 text-sm leading-relaxed">{f.description}</p>
             </motion.div>
           ))}
-        </div>
-      </section>
-
-      {/* Vote section */}
-      <section className="px-8 md:px-16 py-20 bg-white border-t border-slate-100">
-        <div className="max-w-xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-          >
-            <h2 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 mb-10">
-              Would you want this?
-            </h2>
-
-            <AnimatePresence mode="wait">
-              {voted ? (
-                <motion.div
-                  key="result"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col items-center gap-4"
-                >
-                  <p className="text-slate-500 text-base">
-                    {voted === 'yes' ? 'Thanks! Glad to hear it.' : 'Thanks for the honest feedback.'}
-                  </p>
-                  <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-50 border border-blue-100">
-                    <ThumbsUp size={16} className="text-blue-600" />
-                    <span className="text-blue-700 font-bold text-sm">{yesCount} {yesCount === 1 ? 'person wants' : 'people want'} this</span>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="buttons"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex flex-col items-center gap-6"
-                >
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => handleVote('yes')}
-                      className="flex items-center gap-2.5 px-8 py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-base transition-all duration-200 shadow-md shadow-blue-200 hover:shadow-blue-300 hover:-translate-y-0.5"
-                    >
-                      <ThumbsUp size={18} /> Yes
-                    </button>
-                    <button
-                      onClick={() => handleVote('no')}
-                      className="flex items-center gap-2.5 px-8 py-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-base transition-all duration-200 hover:-translate-y-0.5"
-                    >
-                      <ThumbsDown size={18} /> No
-                    </button>
-                  </div>
-                  {yesCount > 0 && (
-                    <p className="text-slate-400 text-sm">{yesCount} {yesCount === 1 ? 'person' : 'people'} said yes</p>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
         </div>
       </section>
 

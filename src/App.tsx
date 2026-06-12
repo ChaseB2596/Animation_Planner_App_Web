@@ -2834,7 +2834,7 @@ const SceneDetailView = ({ scene, onUpdate, isDarkMode }: { scene: Scene, onUpda
 
 export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; onExitDemo?: () => void } = {}) {
   const [isDarkMode, setIsDarkMode] = React.useState(() => {
-    if (isDemo) return true;
+    if (isDemo) return false;
     try {
       const saved = localStorage.getItem('soda-can-dark-mode');
       return saved !== null ? JSON.parse(saved) : true;
@@ -3119,19 +3119,19 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
     <div className="flex flex-col h-screen w-screen overflow-hidden">
       {/* Demo Banner */}
       {isDemo && (
-        <div className="flex-shrink-0 flex items-center justify-between px-6 py-2 bg-gradient-to-r from-blue-700 to-blue-600 text-white text-xs font-semibold z-[100] shadow-lg shadow-blue-900/40">
+        <div className="flex-shrink-0 flex items-center gap-4 px-6 py-2 bg-gradient-to-r from-blue-700 to-blue-600 text-white text-xs font-semibold z-[100] shadow-lg shadow-blue-900/40">
+          <button
+            onClick={onExitDemo}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors font-bold whitespace-nowrap"
+          >
+            ← Back to Landing
+          </button>
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-200 animate-pulse" />
             <span className="uppercase tracking-widest opacity-90">Demo Mode</span>
             <span className="opacity-50 mx-2">·</span>
             <span className="opacity-70 font-normal">Changes are temporary and reset when you leave.</span>
           </div>
-          <button
-            onClick={onExitDemo}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors font-bold"
-          >
-            ← Back to Landing
-          </button>
         </div>
       )}
     <div className={cn(
