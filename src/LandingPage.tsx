@@ -124,8 +124,8 @@ export default function LandingPage({ onLaunchDemo }: Props) {
                 className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-[0_20px_60px_rgba(0,0,0,0.12)] cursor-pointer group"
               >
                 <img
-                  src="/regenerated_image_1777330920029.png"
-                  alt="Animation Planner preview"
+                  src="/app-preview.jpg"
+                  alt="Animation Planner app interface"
                   className="w-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-300 flex items-center justify-center">
