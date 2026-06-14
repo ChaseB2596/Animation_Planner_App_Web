@@ -1519,54 +1519,15 @@ const ReferencesTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUp
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className={cn("text-[10px] uppercase tracking-widest font-bold", isDarkMode ? "text-white/40" : "text-zinc-400")}>Ref Images</p>
-              <button 
-                onClick={() => {
-                  const url = window.prompt('Enter new reference image URL:');
-                  if (url) {
-                    const newImages = [...scene.references.images, url];
-                    onUpdate({ ...scene, references: { ...scene.references, images: newImages } }, scene.id);
-                  }
-                }}
-                className={cn(
-                  "p-1 rounded-md transition-all",
-                  isDarkMode ? "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white" : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600"
-                )}
-              >
-                <Plus size={10} />
-              </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {scene.references.images.map((img, i) => (
-                <div key={i} className="relative group/ref rounded-xl overflow-hidden border border-white/10 aspect-video">
-                  <img 
-                    src={img} 
-                    className="w-full h-full object-cover transition-transform group-hover/ref:scale-110"
+                <div key={i} className="relative rounded-xl overflow-hidden border border-white/10 aspect-video">
+                  <img
+                    src={img}
+                    className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/ref:opacity-100 transition-opacity flex items-end justify-end p-1.5 gap-1">
-                    <button 
-                      onClick={() => {
-                        const newUrl = window.prompt('Enter new image URL:', img);
-                        if (newUrl) {
-                          const newImages = [...scene.references.images];
-                          newImages[i] = newUrl;
-                          onUpdate({ ...scene, references: { ...scene.references, images: newImages } }, scene.id);
-                        }
-                      }}
-                      className="p-1 rounded bg-white/20 hover:bg-white/40 text-white backdrop-blur-sm transition-all"
-                    >
-                      <Edit2 size={8} />
-                    </button>
-                    <button 
-                      onClick={() => {
-                        const newImages = scene.references.images.filter((_, idx) => idx !== i);
-                        onUpdate({ ...scene, references: { ...scene.references, images: newImages } }, scene.id);
-                      }}
-                      className="p-1 rounded bg-red-500/20 hover:bg-red-500/40 text-red-200 backdrop-blur-sm transition-all"
-                    >
-                      <Trash2 size={8} />
-                    </button>
-                  </div>
                 </div>
               ))}
             </div>
