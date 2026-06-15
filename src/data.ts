@@ -126,8 +126,7 @@ export const MOCK_SCENES: Scene[] = [
     ],
     assets: [
       { name: 'Hand Rig', type: 'model', cost: 1450, status: 'create', sourceUrl: 'https://actorcore.reallusion.com/hand-rig' },
-      { name: 'Skin Texture', type: 'texture', cost: 320, status: 'existing' },
-      { name: 'Arm Hair Particles', type: 'other', cost: 1430, status: 'create' }
+      { name: 'Skin Texture', type: 'texture', cost: 320, status: 'existing' }
     ],
     budgetCategories: ['medium', 'complex'],
     schedule: {

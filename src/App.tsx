@@ -1535,13 +1535,13 @@ const ReferencesTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUp
 
           <div className="space-y-2">
             <p className={cn("text-[10px] uppercase tracking-widest font-bold", isDarkMode ? "text-white/40" : "text-zinc-400")}>3D Assets</p>
-            <a href={scene.references.modelLink} className={cn(
-              "flex items-center gap-2 p-2 rounded-xl text-[10px] transition-colors",
-              isDarkMode ? "bg-white/5 text-blue-400 hover:bg-white/10" : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+            <div className={cn(
+              "flex items-center gap-2 p-2 rounded-xl text-[10px] cursor-default",
+              isDarkMode ? "bg-white/5 text-white/40" : "bg-zinc-50 text-zinc-400 border border-zinc-100"
             )}>
               <FolderOpen size={12} />
               {scene.references.modelLink.split('/').pop()}
-            </a>
+            </div>
           </div>
 
           <div className="space-y-2">
