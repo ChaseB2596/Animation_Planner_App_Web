@@ -5,7 +5,7 @@ import {
   Edit2, Copy, GripVertical, Check, AlertCircle, CheckCircle2, StickyNote, Link,
   Send, Download, RotateCcw, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Maximize2, Minimize2,
   MousePointer2, Square, Circle, Triangle, Type, ArrowRight, MousePointer, Pin,
-  Minus, RotateCw, RefreshCw
+  Minus, RotateCw, RefreshCw, Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -31,9 +31,161 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 
-import { Scene, TabType, EditorNode } from './types';
+import { Scene, TabType, EditorNode, Assignment } from './types';
 import { MOCK_SCENES } from './data';
 import { cn } from './lib/utils';
+
+// --- Hourly Billing Helper Functions ---
+export const getEstimatedHours = (scene: Scene): number => {
+  if (scene.estimatedHours3D !== undefined && scene.estimatedHoursComp !== undefined) {
+    return scene.estimatedHours3D + scene.estimatedHoursComp;
+  }
+  return scene.estimatedHours !== undefined ? scene.estimatedHours : Math.round(scene.cost / 50);
+};
+
+export const getBookedHours = (scene: Scene): number => {
+  if (scene.bookedHours3D !== undefined && scene.bookedHoursComp !== undefined) {
+    return scene.bookedHours3D + scene.bookedHoursComp;
+  }
+  if (scene.bookedHours !== undefined) return scene.bookedHours;
+  const progressVals = [
+    scene.progress.stage3D,
+    scene.progress.lighting,
+    scene.progress.rendering,
+    scene.progress.compositing
+  ];
+  const avgProgress = progressVals.reduce((a, b) => a + b, 0) / Math.max(1, progressVals.length);
+  const est = getEstimatedHours(scene);
+  return Math.max(1, Math.round((est * avgProgress) / 100));
+};
+
+export const get3DHours = (scene: Scene, assignments?: Record<string, any[]>): { booked: number, est: number } => {
+  let booked = scene.bookedHours3D !== undefined ? scene.bookedHours3D : 0;
+  const est = scene.estimatedHours3D !== undefined ? scene.estimatedHours3D : Math.max(1, Math.round(getEstimatedHours(scene) * 0.6));
+  
+  let hasTimelineAssignments = false;
+  
+  if (assignments) {
+    let dynamicBooked = 0;
+    Object.keys(assignments).forEach(key => {
+      const val = assignments[key];
+      if (Array.isArray(val)) {
+        val.forEach((item: any) => {
+          if (item.sceneId === scene.id && item.type === '3D') {
+            dynamicBooked += Number(item.hours);
+            hasTimelineAssignments = true;
+          }
+        });
+      }
+    });
+    if (hasTimelineAssignments) {
+      booked = dynamicBooked;
+    }
+  } else {
+    try {
+      const saved = localStorage.getItem('soda-can-artist-assignments');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        let dynamicBooked = 0;
+        Object.keys(parsed).forEach(key => {
+          const val = parsed[key];
+          if (Array.isArray(val)) {
+            val.forEach((item: any) => {
+              if (item.sceneId === scene.id && item.type === '3D') {
+                dynamicBooked += Number(item.hours);
+                hasTimelineAssignments = true;
+              }
+            });
+          }
+        });
+        if (hasTimelineAssignments) {
+          booked = dynamicBooked;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // Fallback if no timeline assignments found and booked was not set directly
+  if (!hasTimelineAssignments && scene.bookedHours3D === undefined) {
+    const totalBooked = getBookedHours(scene);
+    booked = Math.max(0, Math.min(est, Math.round(totalBooked * 0.6)));
+  }
+
+  return { booked, est };
+};
+
+export const getCompHours = (scene: Scene, assignments?: Record<string, any[]>): { booked: number, est: number } => {
+  let booked = scene.bookedHoursComp !== undefined ? scene.bookedHoursComp : 0;
+  const totalEst = getEstimatedHours(scene);
+  const t3D = get3DHours(scene, assignments);
+  const est = scene.estimatedHoursComp !== undefined ? scene.estimatedHoursComp : Math.max(1, totalEst - t3D.est);
+
+  let hasTimelineAssignments = false;
+
+  if (assignments) {
+    let dynamicBooked = 0;
+    Object.keys(assignments).forEach(key => {
+      const val = assignments[key];
+      if (Array.isArray(val)) {
+        val.forEach((item: any) => {
+          if (item.sceneId === scene.id && item.type === 'Comp') {
+            dynamicBooked += Number(item.hours);
+            hasTimelineAssignments = true;
+          }
+        });
+      }
+    });
+    if (hasTimelineAssignments) {
+      booked = dynamicBooked;
+    }
+  } else {
+    try {
+      const saved = localStorage.getItem('soda-can-artist-assignments');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        let dynamicBooked = 0;
+        Object.keys(parsed).forEach(key => {
+          const val = parsed[key];
+          if (Array.isArray(val)) {
+            val.forEach((item: any) => {
+              if (item.sceneId === scene.id && item.type === 'Comp') {
+                dynamicBooked += Number(item.hours);
+                hasTimelineAssignments = true;
+              }
+            });
+          }
+        });
+        if (hasTimelineAssignments) {
+          booked = dynamicBooked;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // Fallback if no timeline assignments found and booked was not set directly
+  if (!hasTimelineAssignments && scene.bookedHoursComp === undefined) {
+    const totalBooked = getBookedHours(scene);
+    booked = Math.max(0, totalBooked - t3D.booked);
+  }
+
+  return { booked, est };
+};
+
+export const getCombinedBookedHours = (scene: Scene, assignments?: Record<string, any[]>): number => {
+  const h3D = get3DHours(scene, assignments);
+  const hComp = getCompHours(scene, assignments);
+  return h3D.booked + hComp.booked;
+};
+
+export const getCombinedEstimatedHours = (scene: Scene, assignments?: Record<string, any[]>): number => {
+  const h3D = get3DHours(scene, assignments);
+  const hComp = getCompHours(scene, assignments);
+  return h3D.est + hComp.est;
+};
 
 // --- Components ---
 
@@ -196,7 +348,9 @@ const StoryboardCard = ({
   onDelete,
   dragHandleProps,
   isDragging,
-  viewMode = 'grid'
+  viewMode = 'grid',
+  billingMode = 'project',
+  assignments = {}
 }: { 
   scene: Scene, 
   onClick: () => void, 
@@ -207,7 +361,9 @@ const StoryboardCard = ({
   onDelete?: () => void,
   dragHandleProps?: any,
   isDragging?: boolean,
-  viewMode?: 'grid' | 'list' | 'timeline'
+  viewMode?: 'grid' | 'list' | 'timeline',
+  billingMode?: 'project' | 'hourly',
+  assignments?: Record<string, Assignment[]>
 }) => {
   if (viewMode === 'list') {
     return (
@@ -276,12 +432,46 @@ const StoryboardCard = ({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          <div className={cn(
-            "px-3 py-1 border rounded-lg flex items-center gap-1",
-            isDarkMode ? "border-green-500/30 bg-green-500/10" : "border-green-200 bg-green-50"
-          )}>
-            <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
-          </div>
+          {billingMode === 'hourly' ? (
+            <div className="flex items-center gap-1.5">
+              {/* 3D (Blue) */}
+              {(() => {
+                const h3D = get3DHours(scene, assignments);
+                return (
+                  <div className={cn(
+                    "px-2.5 py-1 border rounded-xl flex items-center gap-1.5 transition-all shadow-sm font-sans font-bold text-[10px]",
+                    isDarkMode ? "border-blue-500/30 bg-blue-500/10" : "border-blue-200 bg-blue-50"
+                  )}>
+                    <span className={cn(h3D.booked > h3D.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-blue-500")} title="3D Booked">{h3D.booked}</span>
+                    <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                    <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="3D Estimated">{h3D.est}</span>
+                  </div>
+                );
+              })()}
+              
+              {/* Comp (Purple) */}
+              {(() => {
+                const hComp = getCompHours(scene, assignments);
+                return (
+                  <div className={cn(
+                    "px-2.5 py-1 border rounded-xl flex items-center gap-1.5 transition-all shadow-sm font-sans font-bold text-[10px]",
+                    isDarkMode ? "border-purple-500/30 bg-purple-500/10" : "border-purple-200 bg-purple-50"
+                  )}>
+                    <span className={cn(hComp.booked > hComp.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-purple-500")} title="Comp Booked">{hComp.booked}</span>
+                    <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                    <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="Comp Estimated">{hComp.est}</span>
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <div className={cn(
+              "px-3 py-1 border rounded-lg flex items-center gap-1 transition-all",
+              isDarkMode ? "border-green-500/30 bg-green-500/10" : "border-green-200 bg-green-50"
+            )}>
+              <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
+            </div>
+          )}
           
           {isEditMode && (
             <div className="flex gap-1">
@@ -359,7 +549,41 @@ const StoryboardCard = ({
                 </div>
               ))}
             </div>
-            <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
+            {billingMode === 'hourly' ? (
+              <div className="flex items-center gap-1">
+                {/* 3D (Blue) */}
+                {(() => {
+                  const h3D = get3DHours(scene, assignments);
+                  return (
+                    <div className={cn(
+                      "px-1.5 py-0.5 border rounded-lg flex items-center gap-1 font-sans font-bold text-[9px]",
+                      isDarkMode ? "border-blue-500/30 bg-blue-500/10" : "border-blue-200 bg-blue-50"
+                    )}>
+                      <span className={cn(h3D.booked > h3D.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-blue-500")} title="3D Booked">{h3D.booked}</span>
+                      <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                      <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="3D Estimated">{h3D.est}</span>
+                    </div>
+                  );
+                })()}
+                
+                {/* Comp (Purple) */}
+                {(() => {
+                  const hComp = getCompHours(scene, assignments);
+                  return (
+                    <div className={cn(
+                      "px-1.5 py-0.5 border rounded-lg flex items-center gap-1 font-sans font-bold text-[9px]",
+                      isDarkMode ? "border-purple-500/30 bg-purple-500/10" : "border-purple-200 bg-purple-50"
+                    )}>
+                      <span className={cn(hComp.booked > hComp.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-purple-500")} title="Comp Booked">{hComp.booked}</span>
+                      <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                      <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="Comp Estimated">{hComp.est}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
+            )}
           </div>
           <div className="pt-1">
             <CompactSceneProgress 
@@ -551,12 +775,46 @@ const StoryboardCard = ({
             <Palette size={14} />
           </label>
 
-          <div className={cn(
-            "px-3 py-1 border rounded-lg flex items-center gap-1 transition-all",
-            isDarkMode ? "border-green-500/30 bg-green-500/10" : "border-green-200 bg-green-50"
-          )}>
-            <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
-          </div>
+          {billingMode === 'hourly' ? (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* 3D (Blue) */}
+              {(() => {
+                const h3D = get3DHours(scene, assignments);
+                return (
+                  <div className={cn(
+                    "px-2.5 py-1 border rounded-xl flex items-center gap-1.5 transition-all shadow-sm font-sans font-bold text-[10px]",
+                    isDarkMode ? "border-blue-500/30 bg-blue-500/10" : "border-blue-200 bg-blue-50"
+                  )}>
+                    <span className={cn(h3D.booked > h3D.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-blue-500")} title="3D Booked">{h3D.booked}</span>
+                    <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                    <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="3D Estimated">{h3D.est}</span>
+                  </div>
+                );
+              })()}
+              
+              {/* Comp (Purple) */}
+              {(() => {
+                const hComp = getCompHours(scene, assignments);
+                return (
+                  <div className={cn(
+                    "px-2.5 py-1 border rounded-xl flex items-center gap-1.5 transition-all shadow-sm font-sans font-bold text-[10px]",
+                    isDarkMode ? "border-purple-500/30 bg-purple-500/10" : "border-purple-200 bg-purple-50"
+                  )}>
+                    <span className={cn(hComp.booked > hComp.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-purple-500")} title="Comp Booked">{hComp.booked}</span>
+                    <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                    <span className={isDarkMode ? "text-zinc-300" : "text-zinc-900"} title="Comp Estimated">{hComp.est}</span>
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <div className={cn(
+              "px-3 py-1 border rounded-lg flex items-center gap-1 transition-all",
+              isDarkMode ? "border-green-500/30 bg-green-500/10" : "border-green-200 bg-green-50"
+            )}>
+              <span className={cn("text-[10px] font-bold", isDarkMode ? "text-green-400" : "text-green-600")}>${scene.cost}</span>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
@@ -664,7 +922,7 @@ const SceneSection = ({ scene, isEditing, setIsEditing, isDarkMode, onUpdate }: 
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
 
-  const addAsset = (status: 'purchase' | 'create' | 'existing') => {
+  const addAsset = (status: 'purchase' | 'create' | 'existing' | 'provided') => {
     const newAsset: Scene['assets'][0] = { 
       name: 'New Asset', 
       type: 'model', 
@@ -729,7 +987,7 @@ const SceneSection = ({ scene, isEditing, setIsEditing, isDarkMode, onUpdate }: 
             className="overflow-hidden"
           >
             <div className={cn(
-              "p-8 pt-0 grid grid-cols-1 md:grid-cols-3 gap-8",
+              "p-8 pt-0 grid grid-cols-1 md:grid-cols-4 gap-6",
               isDarkMode ? "bg-black/10" : "bg-zinc-50/10"
             )}>
               {/* To Purchase */}
@@ -749,6 +1007,27 @@ const SceneSection = ({ scene, isEditing, setIsEditing, isDarkMode, onUpdate }: 
                 <div className="flex flex-col gap-2">
                   {scene.assets.filter(a => a.status === 'purchase').map((asset, idx) => (
                     <AssetCard key={`purchase-${idx}`} asset={asset} isEditing={isEditing} setIsEditing={setIsEditing} isDarkMode={isDarkMode} scene={scene} onUpdate={onUpdate} borderColor="border-red-500/20" />
+                  ))}
+                </div>
+              </div>
+
+              {/* Provided */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-400 dark:border-zinc-800 pb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 dark:text-zinc-400">Provided Assets</p>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addAsset('provided');
+                    }}
+                    className="p-1 rounded-md bg-transparent text-zinc-600 dark:text-zinc-400 border border-zinc-400 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-black dark:hover:text-white transition-all shadow-sm"
+                  >
+                    <Plus size={10} strokeWidth={3} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {scene.assets.filter(a => a.status === 'provided').map((asset, idx) => (
+                    <AssetCard key={`provided-${idx}`} asset={asset} isEditing={isEditing} setIsEditing={setIsEditing} isDarkMode={isDarkMode} scene={scene} onUpdate={onUpdate} borderColor="" />
                   ))}
                 </div>
               </div>
@@ -802,26 +1081,98 @@ const SceneSection = ({ scene, isEditing, setIsEditing, isDarkMode, onUpdate }: 
   );
 };
 
-const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate: (updated: Scene, originalId: string) => void, isDarkMode: boolean }) => {
+const BudgetTab = ({ 
+  scenes, 
+  onUpdate, 
+  isDarkMode,
+  billingMode,
+  setBillingMode,
+  onAddScene,
+  onDeleteScene,
+  setScenes,
+  assignments = {}
+}: { 
+  scenes: Scene[], 
+  onUpdate: (updated: Scene, originalId: string) => void, 
+  isDarkMode: boolean,
+  billingMode: 'project' | 'hourly',
+  setBillingMode: (mode: 'project' | 'hourly') => void,
+  onAddScene: (index: number) => void,
+  onDeleteScene: (id: string) => void,
+  setScenes: React.Dispatch<React.SetStateAction<Scene[]>>,
+  assignments?: Record<string, Assignment[]>
+}) => {
   const [isEditing, setIsEditing] = React.useState<boolean>(false);
   const [isAssetsOpen, setIsAssetsOpen] = React.useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
+
+  const moveScene = (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= scenes.length) return;
+    const newScenes = [...scenes];
+    const temp = newScenes[index];
+    newScenes[index] = newScenes[newIndex];
+    newScenes[newIndex] = temp;
+    setScenes(newScenes);
+  };
   
   const totalCost = scenes.reduce((acc, s) => acc + s.cost, 0);
+
+  const total3D = scenes.reduce((acc, s) => {
+    const t = get3DHours(s, assignments);
+    return { booked: acc.booked + t.booked, est: acc.est + t.est };
+  }, { booked: 0, est: 0 });
+
+  const totalComp = scenes.reduce((acc, s) => {
+    const t = getCompHours(s, assignments);
+    return { booked: acc.booked + t.booked, est: acc.est + t.est };
+  }, { booked: 0, est: 0 });
+
+  const totalEstimatedHours = total3D.est + totalComp.est;
+  const totalBookedHours = total3D.booked + totalComp.booked;
   
   const allAssets = scenes.flatMap(s => s.assets.map(a => ({ ...a, sceneId: s.id })));
   const totalPurchase = allAssets.filter(a => a.status === 'purchase').reduce((acc, a) => acc + (a.cost || 0), 0);
   const totalCreate = allAssets.filter(a => a.status === 'create').reduce((acc, a) => acc + (a.cost || 0), 0);
   const totalExisting = allAssets.filter(a => a.status === 'existing').reduce((acc, a) => acc + (a.cost || 0), 0);
+  const totalProvided = allAssets.filter(a => a.status === 'provided').reduce((acc, a) => acc + (a.cost || 0), 0);
 
   return (
     <div className="p-8 space-y-8 h-full overflow-y-auto custom-scrollbar">
-      <div className="flex justify-between items-start">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="space-y-6 flex-1">
           <div className="flex items-center gap-12">
-            <div>
-              <h2 className={cn("text-xs font-semibold uppercase tracking-widest mb-1", isDarkMode ? "text-white/50" : "text-zinc-400")}>Total Budget</h2>
-              <p className={cn("text-5xl font-bold font-sans tracking-tighter", isDarkMode ? "text-white" : "text-zinc-900")}>${totalCost.toLocaleString()}</p>
-            </div>
+            {billingMode === 'hourly' ? (
+              <div className="flex gap-12">
+                <div>
+                  <h2 className={cn("text-xs font-semibold uppercase tracking-widest mb-1", isDarkMode ? "text-white/50" : "text-zinc-400")}>Hours Booked</h2>
+                  <p className={cn("text-5xl font-bold font-sans tracking-tighter", totalBookedHours > totalEstimatedHours ? "text-red-500 dark:text-red-400 font-extrabold" : (isDarkMode ? "text-white" : "text-black"))}>
+                    {totalBookedHours} <span className={cn("text-xl font-normal", isDarkMode ? "text-white/70" : "text-black")}>hrs</span>
+                  </p>
+                  <p className="text-[11px] font-bold mt-1.5 flex items-center gap-1.5">
+                    <span className={cn(total3D.booked > total3D.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-blue-500")}>{total3D.booked}h</span>
+                    <span className="opacity-20">|</span>
+                    <span className={cn(totalComp.booked > totalComp.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-purple-500")}>{totalComp.booked}h</span>
+                  </p>
+                </div>
+                <div>
+                  <h2 className={cn("text-xs font-semibold uppercase tracking-widest mb-1", isDarkMode ? "text-white/50" : "text-zinc-400")}>Estimated Hours</h2>
+                  <p className={cn("text-5xl font-bold font-sans tracking-tighter", isDarkMode ? "text-white" : "text-black")}>
+                    {totalEstimatedHours} <span className={cn("text-xl font-normal", isDarkMode ? "text-white/70" : "text-black")}>hrs</span>
+                  </p>
+                  <p className="text-[11px] font-bold mt-1.5 flex items-center gap-1.5">
+                    <span className="text-blue-500">{total3D.est}h</span>
+                    <span className="opacity-20">|</span>
+                    <span className="text-purple-500">{totalComp.est}h</span>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <h2 className={cn("text-xs font-semibold uppercase tracking-widest mb-1", isDarkMode ? "text-white/50" : "text-zinc-400")}>Total Budget</h2>
+                <p className={cn("text-5xl font-bold font-sans tracking-tighter", isDarkMode ? "text-white" : "text-zinc-900")}>${totalCost.toLocaleString()}</p>
+              </div>
+            )}
             
             <button 
               onClick={() => setIsAssetsOpen(!isAssetsOpen)}
@@ -847,7 +1198,7 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
                 className="overflow-hidden"
               >
                 <div className={cn(
-                  "p-6 rounded-2xl border-2 grid grid-cols-1 md:grid-cols-3 gap-6",
+                  "p-6 rounded-2xl border-2 grid grid-cols-1 md:grid-cols-4 gap-6",
                   isDarkMode ? "bg-black/20 border-white/5" : "bg-zinc-50 border-zinc-200"
                 )}>
                   <div className="space-y-3">
@@ -858,16 +1209,22 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
                         <div key={i} className={cn("px-2.5 py-0.5 rounded-full text-[11px] border font-bold flex items-center gap-1.5 transition-all hover:bg-red-500/20", isDarkMode ? "bg-red-500/10 border-red-500/40 text-red-100" : "bg-red-50 border-red-200 text-red-700")}>
                           {a.name}
                           <span className="opacity-40 font-normal">${(a.cost || 0).toLocaleString()}</span>
-                          {a.sourceUrl && (
-                            <button onClick={() => window.open(a.sourceUrl, '_blank')} className="hover:text-white transition-colors">
-                              <Link size={8} />
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                   <div className={cn("space-y-4 border-x px-8", isDarkMode ? "border-white/5" : "border-zinc-200")}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Provided Assets</p>
+                    <p className={cn("text-2xl font-bold font-sans opacity-50", isDarkMode ? "text-white/60" : "text-zinc-500")}>—</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {allAssets.filter(a => a.status === 'provided').map((a, i) => (
+                        <div key={i} className={cn("px-2.5 py-0.5 rounded-full text-[11px] border font-bold flex items-center gap-1.5 transition-all bg-transparent hover:bg-zinc-100 dark:hover:bg-white/10", isDarkMode ? "border-white text-white" : "border-black text-black")}>
+                          {a.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={cn("space-y-4 border-r pr-8", isDarkMode ? "border-white/5" : "border-zinc-200")}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500/60">Asset Creation</p>
                     <p className={cn("text-2xl font-bold font-sans", isDarkMode ? "text-white" : "text-zinc-900")}>${totalCreate.toLocaleString()}</p>
                     <div className="flex flex-wrap gap-1.5">
@@ -875,28 +1232,17 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
                         <div key={i} className={cn("px-2.5 py-0.5 rounded-full text-[11px] border font-bold flex items-center gap-1.5 transition-all hover:bg-blue-500/20", isDarkMode ? "bg-blue-500/10 border-blue-500/40 text-blue-100" : "bg-blue-50 border-blue-200 text-blue-700")}>
                           {a.name}
                           <span className="opacity-40 font-normal">${(a.cost || 0).toLocaleString()}</span>
-                          {a.sourceUrl && (
-                            <button onClick={() => window.open(a.sourceUrl, '_blank')} className="hover:text-white transition-colors">
-                              <Link size={8} />
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                   <div className="space-y-4">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-green-500/60">Project Inventory</p>
-                    <p className={cn("text-2xl font-bold font-sans", isDarkMode ? "text-white" : "text-zinc-900")}>${totalExisting.toLocaleString()}</p>
+                    <p className={cn("text-2xl font-bold font-sans opacity-50", isDarkMode ? "text-white/60" : "text-zinc-500")}>—</p>
                     <div className="flex flex-wrap gap-1.5">
                       {allAssets.filter(a => a.status === 'existing').map((a, i) => (
                         <div key={i} className={cn("px-2.5 py-0.5 rounded-full text-[11px] border font-bold flex items-center gap-1.5 transition-all hover:bg-green-500/20", isDarkMode ? "bg-green-500/10 border-green-500/40 text-green-100" : "bg-green-50 border-green-200 text-green-700")}>
                           {a.name}
-                          <span className="opacity-40 font-normal">${(a.cost || 0).toLocaleString()}</span>
-                          {a.sourceUrl && (
-                            <button onClick={() => window.open(a.sourceUrl, '_blank')} className="hover:text-white transition-colors">
-                              <Link size={8} />
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -921,16 +1267,53 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
       </div>
 
       <div className="space-y-8 pb-20">
-        {scenes.map((scene) => (
+        {scenes.map((scene, index) => (
           <div 
             key={scene.id}
             className={cn(
-              "flex flex-col rounded-2xl border border-l-4 transition-all overflow-hidden",
+              "flex flex-col rounded-2xl border border-l-4 transition-all overflow-hidden relative group",
               isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200 shadow-sm"
             )}
             style={{ borderLeftColor: scene.color }}
           >
-            <div className="flex gap-10 p-8 items-start">
+            <div className="flex gap-10 p-8 items-start relative">
+              {isEditing && (
+                <div className="absolute top-4 right-4 flex items-center gap-1.5 z-10">
+                  <button
+                    onClick={() => moveScene(index, 'up')}
+                    disabled={index === 0}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all disabled:opacity-30",
+                      isDarkMode ? "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                    )}
+                    title="Move Up"
+                  >
+                    <ChevronUp size={14} />
+                  </button>
+                  <button
+                    onClick={() => moveScene(index, 'down')}
+                    disabled={index === scenes.length - 1}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all disabled:opacity-30",
+                      isDarkMode ? "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                    )}
+                    title="Move Down"
+                  >
+                    <ChevronDown size={14} />
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirmId(scene.id)}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all text-red-500 hover:text-white hover:bg-red-500",
+                      isDarkMode ? "bg-red-500/10" : "bg-red-50"
+                    )}
+                    title="Delete Scene"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
+
               {/* Thumbnail & Title */}
               <div className="flex-shrink-0 space-y-4 w-48">
                 <div className="rounded-xl overflow-hidden border border-white/10 shadow-2xl relative group w-full aspect-video">
@@ -940,12 +1323,25 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
                 
                 <div className="space-y-2">
                   <div className="flex flex-col gap-1">
-                    <p 
-                      className="text-[11px] font-black uppercase tracking-widest opacity-60"
-                      style={{ color: scene.color }}
-                    >
-                      {scene.id}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p 
+                        className="text-[11px] font-black uppercase tracking-widest opacity-60"
+                        style={{ color: scene.color }}
+                      >
+                        {scene.id}
+                      </p>
+                      {isEditing && (
+                        <label className="cursor-pointer p-0.5 rounded-md hover:bg-zinc-150 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center relative w-5 h-5">
+                          <input 
+                            type="color" 
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            value={scene.color}
+                            onChange={(e) => onUpdate({ ...scene, color: e.target.value }, scene.id)}
+                          />
+                          <Palette size={12} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
+                        </label>
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1">
                       {isEditing ? (
                         <input 
@@ -1017,33 +1413,117 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
               </div>
 
               {/* Budget Total */}
-              <div className="text-right min-w-[160px] flex-shrink-0 pt-2">
-                {isEditing ? (
-                   <div className="flex flex-col items-end gap-1">
-                     <p className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-white/20" : "text-zinc-400")}>Manual Override</p>
-                     <div className="flex items-center gap-1">
-                       <span className="text-xl font-bold text-green-500 font-sans">$</span>
-                       <input 
-                         type="number"
-                         value={scene.cost}
-                         onChange={(e) => onUpdate({ ...scene, cost: parseInt(e.target.value) || 0 }, scene.id)}
-                         className={cn(
-                           "bg-green-500/5 border-b border-green-500/50 text-3xl font-bold font-sans w-32 text-right focus:outline-none px-1",
-                           isDarkMode ? "text-green-400" : "text-green-600"
-                         )}
-                       />
-                     </div>
-                   </div>
+              <div className="text-right min-w-[200px] flex-shrink-0 pt-2">
+                {billingMode === 'hourly' ? (
+                  isEditing ? (
+                    <div className="flex flex-col items-end gap-4">
+                      {/* 3D edit */}
+                      <div className="flex flex-col items-end gap-1">
+                        <p className={cn("text-[10px] font-bold uppercase tracking-widest text-blue-500/80")}>3D Booked | Est</p>
+                        <div className="flex items-center gap-1 bg-blue-500/5 p-1 rounded-xl border border-blue-500/10">
+                          <input 
+                            type="number"
+                            value={get3DHours(scene, assignments).booked}
+                            onChange={(e) => onUpdate({ ...scene, bookedHours3D: parseInt(e.target.value) || 0 }, scene.id)}
+                            className={cn(
+                              "bg-transparent text-xl font-bold font-sans w-12 text-right focus:outline-none text-blue-500"
+                            )}
+                          />
+                          <span className="text-zinc-400">|</span>
+                          <input 
+                            type="number"
+                            value={get3DHours(scene, assignments).est}
+                            onChange={(e) => onUpdate({ ...scene, estimatedHours3D: parseInt(e.target.value) || 0 }, scene.id)}
+                            className={cn(
+                              "bg-transparent text-xl font-bold font-sans w-12 text-left focus:outline-none",
+                              isDarkMode ? "text-zinc-300" : "text-zinc-800"
+                            )}
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Comp edit */}
+                      <div className="flex flex-col items-end gap-1">
+                        <p className={cn("text-[10px] font-bold uppercase tracking-widest text-purple-500/80")}>Comp Booked | Est</p>
+                        <div className="flex items-center gap-1 bg-purple-500/5 p-1 rounded-xl border border-purple-500/10">
+                          <input 
+                            type="number"
+                            value={getCompHours(scene, assignments).booked}
+                            onChange={(e) => onUpdate({ ...scene, bookedHoursComp: parseInt(e.target.value) || 0 }, scene.id)}
+                            className={cn(
+                              "bg-transparent text-xl font-bold font-sans w-12 text-right focus:outline-none text-purple-500"
+                            )}
+                          />
+                          <span className="text-zinc-400">|</span>
+                          <input 
+                            type="number"
+                            value={getCompHours(scene, assignments).est}
+                            onChange={(e) => onUpdate({ ...scene, estimatedHoursComp: parseInt(e.target.value) || 0 }, scene.id)}
+                            className={cn(
+                              "bg-transparent text-xl font-bold font-sans w-12 text-left focus:outline-none",
+                              isDarkMode ? "text-zinc-300" : "text-zinc-800"
+                            )}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-end gap-4">
+                      {/* 3D Column */}
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-blue-400/80" : "text-blue-600/80")}>3D Hours</span>
+                        <div className={cn(
+                           "flex items-center gap-2 px-4 py-2 rounded-xl border font-sans font-bold text-xl shadow-sm transition-all",
+                           isDarkMode ? "bg-zinc-950/60 border-white/5" : "bg-zinc-50 border-zinc-200"
+                        )}>
+                          <span className={isDarkMode ? "text-blue-400" : "text-blue-600"}>{get3DHours(scene, assignments).booked}</span>
+                          <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                          <span className={isDarkMode ? "text-zinc-200" : "text-zinc-900"}>{get3DHours(scene, assignments).est}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Comp Column */}
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-purple-400/80" : "text-purple-600/80")}>Comp Hours</span>
+                        <div className={cn(
+                           "flex items-center gap-2 px-4 py-2 rounded-xl border font-sans font-bold text-xl shadow-sm transition-all",
+                           isDarkMode ? "bg-zinc-950/60 border-white/5" : "bg-zinc-50 border-zinc-200"
+                        )}>
+                          <span className={isDarkMode ? "text-purple-400" : "text-purple-600"}>{getCompHours(scene, assignments).booked}</span>
+                          <span className="text-zinc-400 dark:text-zinc-600">|</span>
+                          <span className={isDarkMode ? "text-zinc-200" : "text-zinc-900"}>{getCompHours(scene, assignments).est}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
                 ) : (
-                  <>
-                    <p className={cn(
-                      "text-4xl font-bold font-sans tracking-tight mb-1",
-                      isDarkMode ? "text-green-400" : "text-green-600"
-                    )}>
-                      ${scene.cost.toLocaleString()}
-                    </p>
-                    <p className={cn("text-[11px] font-bold uppercase tracking-widest opacity-40", isDarkMode ? "text-white" : "text-zinc-900")}>Scene Allocation</p>
-                  </>
+                  isEditing ? (
+                    <div className="flex flex-col items-end gap-1">
+                      <p className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-white/20" : "text-zinc-400")}>Manual Override</p>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xl font-bold text-green-500 font-sans">$</span>
+                        <input 
+                          type="number"
+                          value={scene.cost}
+                          onChange={(e) => onUpdate({ ...scene, cost: parseInt(e.target.value) || 0 }, scene.id)}
+                          className={cn(
+                            "bg-green-500/5 border-b border-green-500/50 text-3xl font-bold font-sans w-32 text-right focus:outline-none px-1",
+                            isDarkMode ? "text-green-400" : "text-green-600"
+                          )}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className={cn(
+                        "text-4xl font-bold font-sans tracking-tight mb-1",
+                        isDarkMode ? "text-green-400" : "text-green-600"
+                      )}>
+                        ${scene.cost.toLocaleString()}
+                      </p>
+                      <p className={cn("text-[11px] font-bold uppercase tracking-widest opacity-40", isDarkMode ? "text-white" : "text-zinc-900")}>Scene Allocation</p>
+                    </>
+                  )
                 )}
               </div>
             </div>
@@ -1052,6 +1532,172 @@ const BudgetTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate
             <SceneSection scene={scene} isEditing={isEditing} setIsEditing={setIsEditing} isDarkMode={isDarkMode} onUpdate={onUpdate} />
           </div>
         ))}
+
+        {isEditing && (
+          <button 
+            onClick={() => onAddScene(scenes.length)}
+            className={cn(
+              "border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-4 transition-all w-full h-32 mt-4",
+              isDarkMode ? "border-white/10 bg-white/5 text-white/40 hover:border-white/20 hover:text-white/60" : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:border-zinc-300 hover:text-zinc-500"
+            )}
+          >
+            <div className="rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 w-10 h-10">
+              <Plus size={20} />
+            </div>
+            <span className="text-sm font-bold">Add New Scene</span>
+          </button>
+        )}
+      </div>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirmId}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={() => {
+          if (deleteConfirmId) {
+            onDeleteScene(deleteConfirmId);
+          }
+        }}
+        title="Delete Scene"
+        message="Are you sure you want to delete this scene? This action cannot be undone."
+        isDarkMode={isDarkMode}
+      />
+    </div>
+  );
+};
+
+const SettingsTab = ({
+  isDarkMode,
+  setIsDarkMode,
+  billingMode,
+  setBillingMode,
+  onResetProject
+}: {
+  isDarkMode: boolean,
+  setIsDarkMode: (v: boolean) => void,
+  billingMode: 'project' | 'hourly',
+  setBillingMode: (mode: 'project' | 'hourly') => void,
+  onResetProject: () => void
+}) => {
+  return (
+    <div className="p-8 space-y-8 h-full overflow-y-auto custom-scrollbar">
+      <div>
+        <h2 className={cn("text-xs font-semibold uppercase tracking-widest mb-1", isDarkMode ? "text-white/50" : "text-zinc-400")}>Preferences & Configuration</h2>
+        <h1 className={cn("text-4xl font-bold tracking-tight", isDarkMode ? "text-white" : "text-zinc-900")}>Settings</h1>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl">
+        {/* Appearance Section */}
+        <div className={cn(
+          "border rounded-3xl p-6 space-y-6 transition-all",
+          isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200 shadow-sm"
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "w-10 h-10 rounded-2xl flex items-center justify-center",
+              isDarkMode ? "bg-yellow-500/10 text-yellow-400" : "bg-yellow-50 text-yellow-500"
+            )}>
+              <Sun size={20} />
+            </div>
+            <div>
+              <h3 className={cn("text-lg font-bold", isDarkMode ? "text-white" : "text-zinc-900")}>Appearance</h3>
+              <p className={cn("text-xs", isDarkMode ? "text-white/40" : "text-zinc-500")}>Toggle between Light and Dark themes</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <span className={cn("text-sm font-semibold", isDarkMode ? "text-white/80" : "text-zinc-700")}>Theme Mode</span>
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all border",
+                isDarkMode 
+                  ? "bg-zinc-800 border-white/10 text-yellow-400 hover:bg-zinc-750" 
+                  : "bg-white border-zinc-200 text-zinc-850 hover:bg-zinc-50 shadow-sm"
+              )}
+            >
+              {isDarkMode ? (
+                <span className="flex items-center gap-1.5"><Sun size={14} /> Light Mode</span>
+              ) : (
+                <span className="flex items-center gap-1.5"><Moon size={14} /> Dark Mode</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Billing Section */}
+        <div className={cn(
+          "border rounded-3xl p-6 space-y-6 transition-all",
+          isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200 shadow-sm"
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "w-10 h-10 rounded-2xl flex items-center justify-center",
+              isDarkMode ? "bg-blue-500/10 text-blue-400" : "bg-blue-50 text-blue-500"
+            )}>
+              <Clock size={20} />
+            </div>
+            <div>
+              <h3 className={cn("text-lg font-bold", isDarkMode ? "text-white" : "text-zinc-900")}>Billing & Estimation</h3>
+              <p className={cn("text-xs", isDarkMode ? "text-white/40" : "text-zinc-500")}>Switch between Project Cost or Hourly Booking</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <span className={cn("text-sm font-semibold", isDarkMode ? "text-white/80" : "text-zinc-700")}>Billing Model</span>
+            <div className="flex items-center gap-1 p-1 rounded-2xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-white/5">
+              <button
+                onClick={() => setBillingMode('project')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
+                  billingMode === 'project'
+                    ? "bg-blue-500 text-white shadow-md shadow-blue-500/20"
+                    : "text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                )}
+              >
+                Project
+              </button>
+              <button
+                onClick={() => setBillingMode('hourly')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
+                  billingMode === 'hourly'
+                    ? "bg-blue-500 text-white shadow-md shadow-blue-500/20"
+                    : "text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                )}
+              >
+                Hourly
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Danger Zone Section */}
+        <div className={cn(
+          "border rounded-3xl p-6 space-y-6 transition-all md:col-span-2",
+          isDarkMode ? "bg-red-500/5 border-red-500/10" : "bg-red-50/30 border-red-200 shadow-sm"
+        )}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0",
+                "bg-red-500/10 text-red-500"
+              )}>
+                <RotateCcw size={20} />
+              </div>
+              <div>
+                <h3 className={cn("text-lg font-bold", isDarkMode ? "text-white" : "text-zinc-900")}>Reset Project Data</h3>
+                <p className={cn("text-xs", isDarkMode ? "text-white/40" : "text-zinc-500")}>Wipe all customizations, custom progress states, added scenes and reset to original storyboard values.</p>
+              </div>
+            </div>
+
+            <button
+              onClick={onResetProject}
+              className="px-6 py-3 rounded-2xl text-xs font-bold bg-red-500 hover:bg-red-600 text-white transition-all shadow-lg shadow-red-500/20"
+            >
+              Reset to Factory Values
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1070,16 +1716,21 @@ interface AssetCardProps {
 
 const AssetCard = ({ asset, isEditing, setIsEditing, isDarkMode, scene, onUpdate, borderColor }: AssetCardProps) => {
   const assetIdx = scene.assets.findIndex(a => a === asset);
+  const isProvided = asset.status === 'provided';
   
   return (
     <div className={cn(
       "flex items-center gap-2 px-3 py-1 rounded-full border transition-all group",
-      isDarkMode ? "bg-zinc-900/50" : "bg-white",
-      borderColor
+      isProvided
+        ? (isDarkMode ? "bg-transparent border-white text-white" : "bg-transparent border-black text-black font-bold shadow-sm")
+        : (isDarkMode ? "bg-zinc-900/50" : "bg-white"),
+      !isProvided && borderColor
     )}>
       <div className={cn(
         "w-6 h-6 rounded-full flex items-center justify-center transition-colors shadow-inner flex-shrink-0",
-        isDarkMode ? "bg-white/5 text-white/40" : "bg-zinc-100 text-zinc-500"
+        isProvided
+          ? (isDarkMode ? "bg-white/5 text-white/60" : "bg-zinc-100 text-zinc-600")
+          : (isDarkMode ? "bg-white/5 text-white/40" : "bg-zinc-100 text-zinc-500")
       )}>
         {asset.type === 'model' && <Box size={14} />}
         {asset.type === 'texture' && <ImageIcon size={14} />}
@@ -1100,11 +1751,11 @@ const AssetCard = ({ asset, isEditing, setIsEditing, isDarkMode, scene, onUpdate
               }}
               className={cn(
                 "text-sm font-bold leading-tight bg-blue-500/5 border-b border-blue-500/30 focus:outline-none flex-1 min-w-0",
-                isDarkMode ? "text-white/80" : "text-zinc-800"
+                isProvided ? (isDarkMode ? "text-white" : "text-black") : (isDarkMode ? "text-white/80" : "text-zinc-800")
               )}
             />
           ) : (
-            <span className={cn("text-sm font-bold leading-tight truncate", isDarkMode ? "text-white/70" : "text-zinc-800")}>{asset.name}</span>
+            <span className={cn("text-sm font-bold leading-tight truncate", isProvided ? (isDarkMode ? "text-white" : "text-black") : (isDarkMode ? "text-white/70" : "text-zinc-800"))}>{asset.name}</span>
           )}
           
           <div className="flex items-center gap-1">
@@ -1133,22 +1784,14 @@ const AssetCard = ({ asset, isEditing, setIsEditing, isDarkMode, scene, onUpdate
                 </button>
               </>
             )}
-            
-            {(asset.sourceUrl && !isEditing) && (
-              <button 
-                className={cn(
-                  "p-1 rounded-md transition-all opacity-0 group-hover:opacity-100",
-                  isDarkMode ? "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white" : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600"
-                )}
-                onClick={() => window.open(asset.sourceUrl, '_blank')}
-              >
-                <Link size={10} />
-              </button>
-            )}
           </div>
         </div>
         
-        {isEditing ? (
+        {asset.status === 'existing' || asset.status === 'provided' ? (
+          <span className="text-xs font-semibold text-zinc-400 dark:text-zinc-500">
+            {asset.status === 'provided' ? 'Provided Asset' : 'In Inventory'}
+          </span>
+        ) : isEditing ? (
           <div className="flex items-center gap-1 group mt-0.5">
             <span className="text-xs font-bold text-green-500 opacity-60">$</span>
             <input 
@@ -1158,7 +1801,9 @@ const AssetCard = ({ asset, isEditing, setIsEditing, isDarkMode, scene, onUpdate
                 const newVal = parseInt(e.target.value) || 0;
                 const newAssets = [...scene.assets];
                 newAssets[assetIdx] = { ...asset, cost: newVal };
-                const newTotal = newAssets.reduce((acc, a) => acc + (a.cost || 0), 0);
+                const newTotal = newAssets
+                  .filter(a => a.status !== 'existing' && a.status !== 'provided')
+                  .reduce((acc, a) => acc + (a.cost || 0), 0);
                 onUpdate({ ...scene, assets: newAssets, cost: newTotal }, scene.id);
               }}
               className={cn(
@@ -1176,150 +1821,323 @@ const AssetCard = ({ asset, isEditing, setIsEditing, isDarkMode, scene, onUpdate
   );
 };
 
-const ScheduleTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpdate: (updated: Scene, originalId: string) => void, isDarkMode: boolean }) => {
+const ScheduleTab = ({ 
+  scenes, 
+  onUpdate, 
+  isDarkMode,
+  assignments,
+  setAssignments
+}: { 
+  scenes: Scene[], 
+  onUpdate: (updated: Scene, originalId: string) => void, 
+  isDarkMode: boolean,
+  assignments: Record<string, Assignment[]>,
+  setAssignments: React.Dispatch<React.SetStateAction<Record<string, Assignment[]>>>
+}) => {
   const [currentDay, setCurrentDay] = React.useState(0);
-  const [isExpanded, setIsExpanded] = React.useState(true);
-  const [viewWindow] = React.useState(14); // 14 days visible
-  const timelineRef = React.useRef<HTMLDivElement>(null);
-
+  const [viewWindow] = React.useState(5); // 5 days visible (showing a 5 day week)
   const days = Array.from({ length: 30 }, (_, i) => i); // 30 days total project
-  const DAY_WIDTH = 64; // px (w-16)
   const DEADLINE_DAY = 21; // Day 22 (0-indexed is 21)
 
-  const STAGES = [
-    { id: 'stage3D', label: '3D Scene', color: 'bg-blue-500' },
-    { id: 'lighting', label: 'Lighting', color: 'bg-orange-500' },
-    { id: 'rendering', label: 'Rendering', color: 'bg-emerald-500' },
-    { id: 'compositing', label: 'Compositing', color: 'bg-purple-500' },
-  ] as const;
-
-  const handleMove = (dir: 'prev' | 'next') => {
-    if (dir === 'prev') setCurrentDay(Math.max(0, currentDay - 1));
-    else setCurrentDay(Math.min(days.length - viewWindow, currentDay + 1));
+  const getTimelineDayText = (dayIndex: number) => {
+    const startDate = new Date(2026, 5, 29); // June is 5 (0-indexed)
+    const currentDate = new Date(startDate.getTime() + dayIndex * 24 * 60 * 60 * 1000);
+    const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayName = weekdays[currentDate.getDay()];
+    const month = currentDate.getMonth() + 1;
+    const dateNum = currentDate.getDate();
+    return `${dayName} (${month}/${dateNum})`;
   };
 
-  const updateSchedule = (sceneId: string, stageId: string, type: 'start' | 'duration', value: number) => {
-    const scene = scenes.find(s => s.id === sceneId);
-    if (!scene || !scene.schedule) return;
-    
-    const newSchedule = {
-      ...scene.schedule,
-      [stageId]: {
-        ...(scene.schedule as any)[stageId],
-        [type]: Math.max(0, value)
+  const ARTISTS = ["Animator 1", "Animator 2", "Compositor 1"];
+
+  // Editing dialog state
+  const [editingCell, setEditingCell] = React.useState<{ artist: string, day: number, assignmentId?: string } | null>(null);
+  const [dragOverKey, setDragOverKey] = React.useState<string | null>(null);
+  const [deleteAssignmentInfo, setDeleteAssignmentInfo] = React.useState<{ artist: string, day: number, assignmentId: string } | null>(null);
+
+  const handlePrevWeek = () => {
+    setCurrentDay(prev => Math.max(0, prev - 5));
+  };
+
+  const handleNextWeek = () => {
+    setCurrentDay(prev => Math.min(days.length - viewWindow, prev + 5));
+  };
+
+  const handleRemoveAssignment = (artist: string, day: number, assignmentId: string) => {
+    const key = `${artist}-${day}`;
+    setAssignments(prev => {
+      const list = prev[key] ? prev[key].filter(a => a.id !== assignmentId) : [];
+      const updated = { ...prev };
+      if (list.length === 0) {
+        delete updated[key];
+      } else {
+        updated[key] = list;
       }
-    };
+      return updated;
+    });
+  };
+
+  const cellAssignments = editingCell ? (assignments[`${editingCell.artist}-${editingCell.day}`] || []) : [];
+  const currentAssignment = (editingCell && editingCell.assignmentId)
+    ? cellAssignments.find(a => a.id === editingCell.assignmentId) || null
+    : null;
+
+  const handleSaveCellAssignment = (sceneId: string, type: '3D' | 'Comp', hours: number, description: string) => {
+    if (!editingCell) return;
+    const key = `${editingCell.artist}-${editingCell.day}`;
     
-    onUpdate({ ...scene, schedule: newSchedule }, scene.id);
+    setAssignments(prev => {
+      const list = prev[key] ? [...prev[key]] : [];
+      if (editingCell.assignmentId) {
+        // Edit existing assignment
+        const idx = list.findIndex(a => a.id === editingCell.assignmentId);
+        if (idx !== -1) {
+          list[idx] = {
+            ...list[idx],
+            sceneId,
+            type,
+            hours,
+            description
+          };
+        }
+      } else {
+        // Add new assignment
+        list.push({
+          id: `${key}-${sceneId}-${type}-${Math.random()}`,
+          sceneId,
+          type,
+          hours,
+          description
+        });
+      }
+      return {
+        ...prev,
+        [key]: list
+      };
+    });
+    setEditingCell(null);
+  };
+
+  // Drag and drop event handlers
+  const handleDragStart = (e: React.DragEvent, artist: string, day: number, assignmentId: string) => {
+    e.dataTransfer.setData("application/json", JSON.stringify({ artist, day, assignmentId }));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDrop = (e: React.DragEvent, targetArtist: string, targetDay: number) => {
+    e.preventDefault();
+    setDragOverKey(null);
+    try {
+      const dataStr = e.dataTransfer.getData("application/json");
+      if (!dataStr) return;
+      const { artist: srcArtist, day: srcDay, assignmentId } = JSON.parse(dataStr);
+      
+      if (srcArtist === targetArtist && srcDay === targetDay) return;
+      
+      const srcKey = `${srcArtist}-${srcDay}`;
+      const targetKey = `${targetArtist}-${targetDay}`;
+      
+      setAssignments(prev => {
+        const srcList = prev[srcKey] ? [...prev[srcKey]] : [];
+        const targetList = prev[targetKey] ? [...prev[targetKey]] : [];
+        
+        const assignmentIndex = srcList.findIndex(a => a.id === assignmentId);
+        if (assignmentIndex === -1) return prev;
+        
+        const [movedAssignment] = srcList.splice(assignmentIndex, 1);
+        targetList.push(movedAssignment);
+        
+        const updated = { ...prev };
+        if (srcList.length === 0) {
+          delete updated[srcKey];
+        } else {
+          updated[srcKey] = srcList;
+        }
+        updated[targetKey] = targetList;
+        return updated;
+      });
+    } catch (err) {
+      console.error("Error parsing drag data", err);
+    }
   };
 
   return (
-    <div className="p-8 h-full flex flex-col overflow-hidden">
+    <div className="p-6 h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex justify-between items-center mb-8 flex-shrink-0">
-        <div className="flex items-center gap-8">
-          <div>
-            <h2 className={cn("text-2xl font-bold", isDarkMode ? "text-white" : "text-zinc-900")}>Production Schedule</h2>
-            <p className={cn("text-[10px] font-bold uppercase tracking-widest mt-1", isDarkMode ? "text-white/30" : "text-zinc-400")}>Timeline Overview</p>
-          </div>
-
-          {/* Project Stats */}
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              "px-4 py-2 rounded-xl border flex flex-col items-center min-w-[100px]",
-              isDarkMode ? "bg-zinc-900/50 border-white/5" : "bg-white border-zinc-200 shadow-sm"
-            )}>
-              <span className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-blue-400" : "text-blue-600")}>30 Days</span>
-              <span className={cn("text-[8px] font-medium uppercase tracking-widest opacity-40", isDarkMode ? "text-white" : "text-zinc-900")}>Total Duration</span>
-            </div>
-            <div className={cn(
-              "px-4 py-2 rounded-xl border flex flex-col items-center min-w-[100px]",
-              isDarkMode ? "bg-zinc-900/50 border-white/5" : "bg-white border-zinc-200 shadow-sm"
-            )}>
-              <span className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-emerald-400" : "text-emerald-600")}>{DEADLINE_DAY + 1} Days</span>
-              <span className={cn("text-[8px] font-medium uppercase tracking-widest opacity-40", isDarkMode ? "text-white" : "text-zinc-900")}>To Deadline</span>
-            </div>
-            <div className={cn(
-              "px-4 py-2 rounded-xl border flex flex-col items-center min-w-[100px]",
-              isDarkMode ? "bg-zinc-900/50 border-white/5" : "bg-white border-zinc-200 shadow-sm"
-            )}>
-              <span className={cn("text-[10px] font-bold uppercase tracking-widest", isDarkMode ? "text-red-400" : "text-red-600")}>3/22</span>
-              <span className={cn("text-[8px] font-medium uppercase tracking-widest opacity-40", isDarkMode ? "text-white" : "text-zinc-900")}>Deadline Date</span>
-            </div>
-          </div>
+      <div className="flex justify-between items-center mb-6 flex-shrink-0">
+        <div>
+          <h2 className={cn("text-xl font-bold", isDarkMode ? "text-white" : "text-zinc-900")}>Production Schedule</h2>
+          <p className={cn("text-[9px] font-bold uppercase tracking-widest mt-0.5", isDarkMode ? "text-white/30" : "text-zinc-400")}>Artist Allocation Timeline</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Project Stats */}
+        <div className="flex items-center gap-2">
           <div className={cn(
-            "flex p-1 border rounded-xl transition-colors",
-            isDarkMode ? "bg-zinc-900 border-white/5" : "bg-white border-zinc-200 shadow-sm"
+            "px-3 py-1 rounded-xl border flex flex-col items-center min-w-[80px]",
+            isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200/80 shadow-sm"
           )}>
-            <button 
-              onClick={() => setIsExpanded(!isExpanded)} 
-              className={cn(
-                "px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2",
-                isDarkMode ? "text-white/40 hover:text-white" : "text-zinc-400 hover:text-zinc-600"
-              )}
-            >
-              {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              {isExpanded ? 'Compact' : 'Expanded'}
-            </button>
+            <span className={cn("text-[9px] font-bold uppercase tracking-widest", isDarkMode ? "text-blue-400" : "text-blue-600")}>5-Day View</span>
+            <span className="text-[7px] font-medium uppercase tracking-widest opacity-40 text-zinc-500">Weekly Window</span>
+          </div>
+          <div className={cn(
+            "px-3 py-1 rounded-xl border flex flex-col items-center min-w-[80px]",
+            isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200/80 shadow-sm"
+          )}>
+            <span className={cn("text-[9px] font-bold uppercase tracking-widest", isDarkMode ? "text-emerald-400" : "text-emerald-600")}>30 Days</span>
+            <span className="text-[7px] font-medium uppercase tracking-widest opacity-40 text-zinc-500">Total Timeline</span>
+          </div>
+          <div className={cn(
+            "px-3 py-1 rounded-xl border flex flex-col items-center min-w-[80px]",
+            isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-white border-zinc-200/80 shadow-sm"
+          )}>
+            <span className={cn("text-[9px] font-bold uppercase tracking-widest", isDarkMode ? "text-red-400" : "text-red-600")}>Day 22</span>
+            <span className="text-[7px] font-medium uppercase tracking-widest opacity-40 text-zinc-500">Deadline Marker</span>
           </div>
         </div>
       </div>
 
-      {/* Timeline Grid */}
-      <div className={cn(
-             "flex-1 overflow-auto no-scrollbar border rounded-2xl transition-colors relative",
-             isDarkMode ? "bg-zinc-900/20 border-white/5" : "bg-white border-zinc-200 shadow-inner"
-           )}>
-        <div className="min-w-fit flex flex-col p-6">
-          {/* Repositioned Scroller */}
-          <div className="flex mb-8 sticky top-0 z-30">
-            <div className="w-64 flex-shrink-0" />
-            <div className="flex-1 px-4">
-              <div className={cn(
-                "w-full h-4 rounded-full relative overflow-hidden transition-colors border",
-                isDarkMode ? "bg-white/5 border-white/10" : "bg-zinc-100 border-zinc-200 shadow-inner"
-              )}>
-                <input 
-                  type="range"
-                  min={0}
-                  max={days.length - viewWindow}
-                  value={currentDay}
-                  onChange={(e) => setCurrentDay(parseInt(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                />
-                <div 
-                  className="h-full bg-blue-500/80 rounded-full transition-all duration-200 pointer-events-none flex items-center justify-center"
-                  style={{ 
-                    width: `${(viewWindow / days.length) * 100}%`,
-                    marginLeft: `${(currentDay / days.length) * 100}%`,
-                  }}
-                >
-                  <div className="w-8 h-1 bg-white/40 rounded-full" />
-                </div>
+      {/* Storyboard Overview with Project Tab Styling */}
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+        <Layers size={14} className="text-blue-500" />
+        <h3 className={cn("text-[10px] font-black uppercase tracking-widest", isDarkMode ? "text-zinc-400" : "text-zinc-600")}>Storyboard Overview</h3>
+      </div>
+      
+      <div 
+        className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6 custom-scrollbar flex-shrink-0 mb-4"
+      >
+        {scenes.map(scene => (
+          <div 
+            key={scene.id} 
+            className={cn(
+              "flex-shrink-0 w-48 border border-l-4 rounded-xl overflow-hidden group transition-all duration-300 relative",
+              isDarkMode ? "bg-zinc-900/30 border-white/5 hover:border-white/15" : "bg-white border-zinc-200/80 hover:border-zinc-300 shadow-sm"
+            )}
+            style={{ borderLeftColor: scene.color }}
+          >
+            <div className="relative aspect-video overflow-hidden">
+              <img 
+                src={scene.thumbnail} 
+                alt={scene.title} 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div 
+                style={{ backgroundColor: scene.color }}
+                className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-opacity-80 backdrop-blur-md rounded text-[8px] text-white font-bold"
+              >
+                {scene.id.toUpperCase()}
               </div>
-              <div className="flex justify-between mt-2 px-1">
-                <span className="text-[8px] font-bold uppercase tracking-widest opacity-30">Day 1</span>
-                <span className={cn("text-[9px] font-black uppercase tracking-widest", isDarkMode ? "text-blue-400" : "text-blue-600")}>
-                  Viewing: Day {currentDay + 1} — {currentDay + viewWindow}
-                </span>
-                <span className="text-[8px] font-bold uppercase tracking-widest opacity-30">Day 30</span>
+              <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded text-[8px] text-white/90">
+                {scene.duration}s
+              </div>
+            </div>
+            <div className="p-2 space-y-1.5">
+              <h4 className={cn("text-[10px] font-bold truncate", isDarkMode ? "text-white" : "text-zinc-800")}>{scene.title}</h4>
+              
+              <div className="flex items-center gap-1.5">
+                {/* 3D (Blue) */}
+                {(() => {
+                  const h3D = get3DHours(scene, assignments);
+                  return (
+                    <div 
+                      className={cn(
+                        "flex-1 py-0.5 border rounded-lg flex items-center justify-center gap-1 font-sans font-bold text-xs",
+                        isDarkMode ? "border-blue-500/30 bg-blue-500/10" : "border-blue-200 bg-blue-50/50 shadow-sm"
+                      )}
+                      title="3D Booked | Estimated"
+                    >
+                      <span className={cn(h3D.booked > h3D.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-blue-500 dark:text-blue-400")}>{h3D.booked}</span>
+                      <span className="opacity-30 font-normal text-zinc-400">|</span>
+                      <span className={isDarkMode ? "text-zinc-300" : "text-zinc-700"}>{h3D.est}</span>
+                    </div>
+                  );
+                })()}
+                
+                {/* Comp (Purple) */}
+                {(() => {
+                  const hComp = getCompHours(scene, assignments);
+                  return (
+                    <div 
+                      className={cn(
+                        "flex-1 py-0.5 border rounded-lg flex items-center justify-center gap-1 font-sans font-bold text-xs",
+                        isDarkMode ? "border-purple-500/30 bg-purple-500/10" : "border-purple-200 bg-purple-50/50 shadow-sm"
+                      )}
+                      title="Comp Booked | Estimated"
+                    >
+                      <span className={cn(hComp.booked > hComp.est ? "text-red-500 dark:text-red-400 font-extrabold" : "text-purple-500 dark:text-purple-400")}>{hComp.booked}</span>
+                      <span className="opacity-30 font-normal text-zinc-400">|</span>
+                      <span className={isDarkMode ? "text-zinc-300" : "text-zinc-700"}>{hComp.est}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
+        ))}
+      </div>
 
+      {/* Production Timeline Grid (Fills most of screen space) */}
+      <div className={cn(
+        "flex-1 overflow-auto border rounded-2xl relative custom-scrollbar",
+        isDarkMode ? "bg-zinc-950/20 border-white/5" : "bg-white border-zinc-200 shadow-sm"
+      )}>
+        <div className="min-w-fit flex flex-col p-4">
+          
           {/* Days Header */}
-          <div className="flex mb-6 sticky top-0 z-20">
-            <div className="w-64 flex-shrink-0" />
+          <div className="flex mb-4 sticky top-0 z-20 items-center">
+            {/* Week Navigation Switcher inside the Left Column Header space */}
+            <div className={cn(
+              "w-60 flex-shrink-0 flex flex-col justify-center pr-6 sticky left-0 z-30",
+              isDarkMode ? "bg-zinc-950/95 backdrop-blur-md" : "bg-white/95 backdrop-blur-md"
+            )}>
+              <div className={cn(
+                "flex items-center justify-between p-1 border rounded-xl shadow-sm w-full",
+                isDarkMode ? "bg-zinc-900 border-white/10" : "bg-white border-zinc-200"
+              )}>
+                <button 
+                  onClick={handlePrevWeek} 
+                  disabled={currentDay === 0}
+                  className={cn(
+                    "p-1 rounded-lg transition-all disabled:opacity-30",
+                    isDarkMode ? "hover:bg-white/5 text-white/75" : "hover:bg-zinc-100 text-zinc-600"
+                  )}
+                  title="Previous Week"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                
+                <div className="flex flex-col items-center">
+                  <span className={cn("text-[8px] font-black uppercase tracking-widest leading-none mb-0.5", isDarkMode ? "text-zinc-500" : "text-zinc-400")}>
+                    Week {Math.floor(currentDay / 5) + 1}
+                  </span>
+                  <span className={cn("text-[9px] font-bold leading-none", isDarkMode ? "text-zinc-300" : "text-zinc-700")}>
+                    D{currentDay + 1}-{currentDay + 5}
+                  </span>
+                </div>
+                
+                <button 
+                  onClick={handleNextWeek} 
+                  disabled={currentDay >= days.length - viewWindow}
+                  className={cn(
+                    "p-1 rounded-lg transition-all disabled:opacity-30",
+                    isDarkMode ? "hover:bg-white/5 text-white/75" : "hover:bg-zinc-100 text-zinc-600"
+                  )}
+                  title="Next Week"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Day Columns */}
             <div className="flex relative">
               {days.slice(currentDay, currentDay + viewWindow).map(day => (
-                <div key={day} className="w-16 flex-shrink-0 flex flex-col items-center">
-                  <span className={cn("text-[10px] font-bold uppercase tracking-widest mb-1", isDarkMode ? "text-white/20" : "text-zinc-300")}>
-                    3/{day + 1}
+                <div key={day} className="w-[220px] flex-shrink-0 flex flex-col items-center px-2">
+                  <span className={cn("text-[10px] font-bold tracking-widest mb-1", isDarkMode ? "text-zinc-350" : "text-black")}>
+                    {getTimelineDayText(day)}
                   </span>
-                  <div className={cn("w-[2px] h-2 rounded-full", isDarkMode ? "bg-white/20" : "bg-zinc-300")} />
+                  <div className={cn("w-full h-[2px] rounded-full", isDarkMode ? "bg-white/10" : "bg-zinc-200")} />
                 </div>
               ))}
               
@@ -1327,171 +2145,437 @@ const ScheduleTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUpda
               {DEADLINE_DAY >= currentDay && DEADLINE_DAY < currentDay + viewWindow && (
                 <div 
                   className="absolute top-0 w-[2px] h-full bg-red-500 z-30"
-                  style={{ left: `${(DEADLINE_DAY - currentDay) * DAY_WIDTH + DAY_WIDTH/2}px` }}
+                  style={{ left: `${(DEADLINE_DAY - currentDay) * 220 + 110}px` }}
                 >
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-red-500 text-[8px] text-white px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">
-                    Deadline (3/22)
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-red-500 text-[7px] text-white px-1.5 py-0.5 rounded font-bold uppercase tracking-widest shadow-md">
+                    Deadline (7/20)
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Scenes Timeline */}
-          <div className="space-y-0">
-            {scenes.map(scene => (
-              <div key={scene.id} className={cn(
-                "flex items-center group transition-all duration-500 border-b",
-                isDarkMode ? "border-white/5" : "border-zinc-100",
-                isExpanded ? "h-48" : "h-20"
-              )}>
-                {/* Scene Info */}
-                <div className="w-64 flex-shrink-0 flex items-center gap-4 pr-8 sticky left-0 z-10">
+          {/* Artists Rows */}
+          <div className="space-y-3">
+            {ARTISTS.map(artist => (
+              <div key={artist} className="flex items-stretch">
+                {/* Artist Label Column (Sticky Left so it covers scroll correctly) */}
+                <div className={cn(
+                  "w-60 flex-shrink-0 flex flex-col justify-center pr-6 border-r border-dashed border-zinc-200 dark:border-white/5 sticky left-0 z-10",
+                  isDarkMode ? "bg-zinc-950" : "bg-white"
+                )}>
                   <div className={cn(
-                    "rounded-2xl overflow-hidden flex-shrink-0 border transition-all duration-500",
-                    isDarkMode ? "border-white/10" : "border-zinc-200 shadow-sm",
-                    isExpanded ? "w-20 h-20" : "w-10 h-10"
+                    "p-3 rounded-xl border transition-all flex flex-col",
+                    isDarkMode ? "bg-zinc-900/40 border-white/5" : "bg-zinc-50 border-zinc-200/60 shadow-sm"
                   )}>
-                    <img src={scene.thumbnail} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-tight mb-0.5" style={{ color: scene.color }}>{scene.id}</p>
-                    <h3 className={cn("text-sm font-bold truncate", isDarkMode ? "text-white" : "text-zinc-900")}>{scene.title}</h3>
+                    <span className={cn(
+                      "text-xs font-black tracking-wide",
+                      isDarkMode ? "text-white" : "text-black"
+                    )}>{artist}</span>
+                    <span className={cn(
+                      "text-[8px] font-bold uppercase tracking-wider mt-0.5",
+                      artist === "Compositor 1"
+                        ? "text-purple-500 dark:text-purple-400"
+                        : "text-blue-500/85"
+                    )}>{artist === "Compositor 1" ? "Compositing Artist" : "Animator Specialist"}</span>
+                    
+                    {/* Sum of hours assigned */}
+                    <span className="text-[9px] font-bold text-zinc-400 mt-1.5">
+                      Total: {Object.keys(assignments)
+                        .filter(k => k.startsWith(artist))
+                        .reduce((sum, k) => sum + (assignments[k] || []).reduce((cellSum, a) => cellSum + a.hours, 0), 0)}h assigned
+                    </span>
                   </div>
                 </div>
 
-                {/* Timeline Tracks */}
-                <div className={cn(
-                  "relative flex-1 h-full flex flex-col justify-center",
-                  isExpanded ? "gap-3" : "gap-1"
-                )}>
-                  {/* Background Grid Lines */}
-                  <div className="absolute inset-0 flex pointer-events-none">
-                    {days.slice(currentDay, currentDay + viewWindow).map(day => (
-                      <div key={day} className={cn("w-16 h-full flex-shrink-0 border-r-[2px]", isDarkMode ? "border-white/5" : "border-zinc-100")} />
-                    ))}
-                    
-                    {/* Deadline Marker Body */}
-                    {DEADLINE_DAY >= currentDay && DEADLINE_DAY < currentDay + viewWindow && (
-                      <div 
-                        className="absolute top-0 w-[2px] h-full bg-red-500/20 z-0"
-                        style={{ left: `${(DEADLINE_DAY - currentDay) * DAY_WIDTH + DAY_WIDTH/2}px` }}
-                      >
-                        <div className="w-full h-full border-l-[2px] border-red-500/40 border-dashed" />
-                      </div>
-                    )}
-                  </div>
-
-                  {STAGES.map(stage => {
-                    const sched = scene.schedule?.[stage.id];
-                    if (!sched) return null;
-                    
-                    const startOffset = sched.start - currentDay;
-                    const width = sched.duration;
-                    
-                    // Only render if visible in current window
-                    if (startOffset + width < 0 || startOffset > viewWindow) return null;
-
-                    const left = Math.max(0, startOffset) * 4;
-                    const barWidth = Math.min(viewWindow - Math.max(0, startOffset), width + Math.min(0, startOffset)) * 4;
+                {/* Day Cells */}
+                <div className="flex relative">
+                  {days.slice(currentDay, currentDay + viewWindow).map(day => {
+                    const assignKey = `${artist}-${day}`;
+                    const cellAssignmentsList = assignments[assignKey] || [];
 
                     return (
-                      <motion.div
-                        key={stage.id}
-                        layout
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        drag="x"
-                        dragMomentum={false}
-                        dragElastic={0}
-                        onDragEnd={(_, info) => {
-                          const deltaDays = Math.round(info.offset.x / DAY_WIDTH);
-                          if (deltaDays !== 0) {
-                            updateSchedule(scene.id, stage.id, 'start', sched.start + deltaDays);
-                          }
+                      <div 
+                        key={day} 
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverKey(assignKey);
                         }}
+                        onDragLeave={() => {
+                          setDragOverKey(null);
+                        }}
+                        onDrop={(e) => handleDrop(e, artist, day)}
                         className={cn(
-                          "rounded-lg relative group/bar transition-all duration-300 shadow-lg flex items-center justify-between px-3 cursor-grab active:cursor-grabbing overflow-hidden",
-                          isExpanded ? "h-7" : "h-3",
-                          stage.color
+                          "w-[220px] flex-shrink-0 px-2 py-3 flex flex-col gap-2 rounded-2xl border-2 border-transparent transition-all min-h-[160px] relative justify-start",
+                          dragOverKey === assignKey && (isDarkMode ? "bg-blue-500/10 border-blue-500/40 border-dashed" : "bg-blue-50 border-blue-300 border-dashed")
                         )}
-                        style={{
-                          marginLeft: `${left}rem`,
-                          width: `${barWidth}rem`,
-                        }}
                       >
-                        {/* Glow Effect */}
-                        <div className={cn("absolute inset-0 rounded-lg blur-md opacity-0 group-hover/bar:opacity-40 transition-opacity", stage.color)} />
-                        
-                        {/* Resize Handle Left */}
-                        <div 
-                          className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/20 z-20 flex items-center justify-center"
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            const startX = e.clientX;
-                            const startDur = sched.duration;
-                            const startPos = sched.start;
-                            const onMouseMove = (moveEvent: MouseEvent) => {
-                              const delta = Math.round((moveEvent.clientX - startX) / DAY_WIDTH);
-                              if (delta !== 0) {
-                                updateSchedule(scene.id, stage.id, 'start', startPos + delta);
-                                updateSchedule(scene.id, stage.id, 'duration', startDur - delta);
-                              }
-                            };
-                            const onMouseUp = () => {
-                              window.removeEventListener('mousemove', onMouseMove);
-                              window.removeEventListener('mouseup', onMouseUp);
-                            };
-                            window.addEventListener('mousemove', onMouseMove);
-                            window.addEventListener('mouseup', onMouseUp);
-                          }}
-                        >
-                          <div className="w-1 h-3 bg-white/40 rounded-full" />
-                        </div>
+                        {cellAssignmentsList.length > 0 ? (
+                          <div className="flex flex-col gap-2 w-full">
+                            {cellAssignmentsList.map(assignment => {
+                              const scene = scenes.find(s => s.id === assignment.sceneId);
+                              if (!scene) return null;
+                              return (
+                                <div 
+                                  key={assignment.id}
+                                  draggable
+                                  onDragStart={(e) => handleDragStart(e, artist, day, assignment.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingCell({ artist, day, assignmentId: assignment.id });
+                                  }}
+                                  className={cn(
+                                    "w-full rounded-xl border p-2.5 transition-all relative overflow-hidden flex flex-col shadow-sm cursor-grab active:cursor-grabbing hover:scale-[1.02] group select-none",
+                                    assignment.type === '3D' 
+                                      ? (isDarkMode ? "bg-blue-950/30 border-blue-500/30 hover:border-blue-500/60" : "bg-blue-50/70 border-blue-200 hover:border-blue-400")
+                                      : (isDarkMode ? "bg-purple-950/30 border-purple-500/30 hover:border-purple-500/60" : "bg-purple-50/70 border-purple-200 hover:border-purple-400")
+                                  )}
+                                >
+                                  {/* Accent Glow border */}
+                                  <div className={cn(
+                                    "absolute top-0 left-0 w-1 h-full",
+                                    assignment.type === '3D' ? "bg-blue-500" : "bg-purple-500"
+                                  )} />
 
-                        {/* Label Inside */}
-                        {isExpanded && (
-                          <span className="text-[9px] font-black uppercase tracking-widest text-white truncate z-10 drop-shadow-sm">
-                            {stage.label}
-                          </span>
+                                  {/* Title & Hours */}
+                                  <div className="ml-1.5 flex flex-col gap-0.5">
+                                    <div className="flex justify-between items-center gap-1.5">
+                                      <span className="text-[10px] font-black tracking-wide uppercase" style={{ color: scene.color }}>
+                                        {scene.id}
+                                      </span>
+                                      
+                                      <div className="flex items-center gap-1">
+                                        <span className={cn(
+                                          "text-[9px] font-black font-sans px-1.5 py-0.5 rounded border",
+                                          assignment.type === '3D' 
+                                            ? (isDarkMode ? "bg-blue-500/10 border-blue-500/20 text-blue-400" : "bg-blue-100/50 border-blue-200 text-blue-700")
+                                            : (isDarkMode ? "bg-purple-500/10 border-purple-500/20 text-purple-400" : "bg-purple-100/50 border-purple-200 text-purple-700")
+                                        )}>
+                                          {assignment.hours}h
+                                        </span>
+                                        
+                                        {/* Red X Close Button */}
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteAssignmentInfo({ artist, day, assignmentId: assignment.id });
+                                          }}
+                                          className={cn(
+                                            "p-0.5 rounded transition-all",
+                                            isDarkMode ? "hover:bg-red-500/20 text-white/40 hover:text-red-400" : "hover:bg-red-50 text-zinc-400 hover:text-red-600"
+                                          )}
+                                          title="Remove from day"
+                                        >
+                                          <X size={10} strokeWidth={3} />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Description */}
+                                    <p className={cn(
+                                      "text-xs font-bold leading-tight mt-0.5 pr-2 truncate",
+                                      isDarkMode ? "text-zinc-200" : "text-zinc-800"
+                                    )}>
+                                      {assignment.description || scene.title}
+                                    </p>
+                                  </div>
+
+                                  {/* Hover Edit Indicator */}
+                                  <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5">
+                                    <Edit2 size={8} className="text-zinc-400" />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            
+                            {/* Small plus button to add another task */}
+                            <button
+                              onClick={() => setEditingCell({ artist, day })}
+                              className={cn(
+                                "w-full py-1.5 rounded-xl border border-dashed text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 transition-all",
+                                isDarkMode 
+                                  ? "border-white/5 hover:border-blue-500/30 text-white/40 hover:text-blue-400 bg-white/5 hover:bg-blue-500/5" 
+                                  : "border-zinc-200 hover:border-blue-300 text-zinc-500 hover:text-blue-600 bg-zinc-50/50 hover:bg-blue-50/30"
+                              )}
+                            >
+                              <Plus size={10} />
+                              Add Task
+                            </button>
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={() => setEditingCell({ artist, day })}
+                            className={cn(
+                              "w-full rounded-2xl border-2 border-dashed p-4 flex flex-col items-center justify-center transition-all h-[116px] text-center cursor-pointer group",
+                              isDarkMode 
+                                ? "border-white/10 hover:border-blue-500/40 bg-zinc-900/20 hover:bg-zinc-900/40" 
+                                : "border-zinc-200 hover:border-blue-300 bg-zinc-50/30 hover:bg-blue-50/10"
+                            )}
+                          >
+                            <Plus size={16} className="text-zinc-400 dark:text-zinc-600 mb-1 group-hover:scale-110 transition-transform" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 dark:text-zinc-600">Unassigned</span>
+                          </div>
                         )}
-
-                        {/* Resize Handle Right */}
-                        <div 
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/20 z-20 flex items-center justify-center"
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            const startX = e.clientX;
-                            const startDur = sched.duration;
-                            const onMouseMove = (moveEvent: MouseEvent) => {
-                              const delta = Math.round((moveEvent.clientX - startX) / DAY_WIDTH);
-                              if (delta !== 0) {
-                                updateSchedule(scene.id, stage.id, 'duration', startDur + delta);
-                              }
-                            };
-                            const onMouseUp = () => {
-                              window.removeEventListener('mousemove', onMouseMove);
-                              window.removeEventListener('mouseup', onMouseUp);
-                            };
-                            window.addEventListener('mousemove', onMouseMove);
-                            window.addEventListener('mouseup', onMouseUp);
-                          }}
-                        >
-                          <div className="w-1 h-3 bg-white/40 rounded-full" />
-                        </div>
-
-                        {/* Tooltip */}
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover/bar:opacity-100 transition-all scale-90 group-hover/bar:scale-100 bg-zinc-900 text-[9px] font-bold uppercase tracking-widest text-white px-3 py-1.5 rounded-lg whitespace-nowrap pointer-events-none z-50 shadow-xl border border-white/10">
-                          {sched.duration} Days (3/{sched.start + 1} - 3/{sched.start + sched.duration})
-                        </div>
-                      </motion.div>
+                      </div>
                     );
                   })}
+
+                  {/* Red Deadline line body overlay */}
+                  {DEADLINE_DAY >= currentDay && DEADLINE_DAY < currentDay + viewWindow && (
+                    <div 
+                      className="absolute top-0 w-[2px] h-full pointer-events-none"
+                      style={{ left: `${(DEADLINE_DAY - currentDay) * 220 + 110}px` }}
+                    >
+                      <div className="w-full h-full border-l-[2px] border-red-500/40 border-dashed" />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Editing Dialog Modal */}
+      <AnimatePresence>
+        {editingCell && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingCell(null)}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            />
+            
+            {/* Content Card */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className={cn(
+                "relative w-full max-w-md rounded-3xl p-6 border shadow-2xl z-10",
+                isDarkMode ? "bg-zinc-900 border-white/10 text-white" : "bg-white border-zinc-200 text-zinc-900"
+              )}
+            >
+              {/* Close button */}
+              <button 
+                onClick={() => setEditingCell(null)}
+                className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+              >
+                <X size={16} />
+              </button>
+
+              <h3 className="text-lg font-black tracking-tight mb-1">Allocate Artist Schedule</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6 font-bold uppercase tracking-wide">
+                {editingCell.artist} • Day {editingCell.day + 1}
+              </p>
+
+              {/* Form implementation */}
+              <ArtistSchedulerForm 
+                scenes={scenes}
+                currentAssignment={currentAssignment}
+                onSave={handleSaveCellAssignment}
+                isDarkMode={isDarkMode}
+              />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteAssignmentInfo}
+        onClose={() => setDeleteAssignmentInfo(null)}
+        onConfirm={() => {
+          if (deleteAssignmentInfo) {
+            handleRemoveAssignment(
+              deleteAssignmentInfo.artist, 
+              deleteAssignmentInfo.day, 
+              deleteAssignmentInfo.assignmentId
+            );
+          }
+        }}
+        title="Remove Assignment"
+        message="Are you sure you want to remove this assignment from the timeline?"
+        isDarkMode={isDarkMode}
+      />
+    </div>
+  );
+};
+
+// Helper internal form for editing artist assignment cell
+const ArtistSchedulerForm = ({ 
+  scenes, 
+  currentAssignment, 
+  onSave, 
+  isDarkMode 
+}: { 
+  scenes: Scene[], 
+  currentAssignment: { id: string, sceneId: string, hours: number, type: '3D' | 'Comp', description: string } | null,
+  onSave: (sceneId: string, type: '3D' | 'Comp', hours: number, description: string) => void,
+  isDarkMode: boolean
+}) => {
+  const [selectedSceneId, setSelectedSceneId] = React.useState<string>(currentAssignment?.sceneId || (scenes[0]?.id || 'sc-1'));
+  const [selectedType, setSelectedType] = React.useState<'3D' | 'Comp'>(currentAssignment?.type || '3D');
+  const [hoursVal, setHoursVal] = React.useState<number>(() => {
+    const h = currentAssignment?.hours || 8;
+    return Math.floor(h);
+  });
+  const [minutesVal, setMinutesVal] = React.useState<number>(() => {
+    const h = currentAssignment?.hours || 8;
+    return Math.round((h % 1) * 60);
+  });
+  const [description, setDescription] = React.useState<string>(currentAssignment?.description || '');
+
+  const computedHours = Number((hoursVal + minutesVal / 60).toFixed(2));
+  const finalHours = computedHours <= 0 ? 0.25 : computedHours;
+
+  const handleSliderChange = (val: number) => {
+    const h = Math.floor(val);
+    const m = Math.round((val % 1) * 60);
+    setHoursVal(h);
+    setMinutesVal(m);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Scene Selector */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Select Scene</label>
+        <div className="grid grid-cols-2 gap-2">
+          {scenes.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setSelectedSceneId(s.id)}
+              className={cn(
+                "p-2.5 rounded-xl border text-xs font-black transition-all flex items-center gap-2 truncate",
+                selectedSceneId === s.id
+                  ? "border-blue-500 bg-blue-500/10 text-blue-500"
+                  : (isDarkMode ? "border-white/5 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300" : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-700")
+              )}
+            >
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+              {s.id.toUpperCase()}: {s.title}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Phase Selector */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Production Phase</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedType('3D')}
+            className={cn(
+              "flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all font-sans flex items-center justify-center gap-1.5",
+              selectedType === '3D'
+                ? "border-blue-500 bg-blue-500/15 text-blue-400 font-black"
+                : (isDarkMode ? "border-white/5 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400" : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-600")
+            )}
+          >
+            <Box size={14} />
+            3D Scene Assembly
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedType('Comp')}
+            className={cn(
+              "flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all font-sans flex items-center justify-center gap-1.5",
+              selectedType === 'Comp'
+                ? "border-purple-500 bg-purple-500/15 text-purple-400 font-black"
+                : (isDarkMode ? "border-white/5 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400" : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-600")
+            )}
+          >
+            <Layers size={14} />
+            Compositing
+          </button>
+        </div>
+      </div>
+
+      {/* Description Field */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">What they did for the scene (Description)</label>
+        <input 
+          type="text"
+          placeholder="e.g. Polished reflections, adjusted timing..."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className={cn(
+            "w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-sans font-medium transition-all",
+            isDarkMode ? "bg-zinc-800 border-white/10 text-white placeholder-zinc-500" : "bg-zinc-50 border-zinc-200 text-zinc-900 placeholder-zinc-400"
+          )}
+        />
+      </div>
+
+      {/* Hours Input */}
+      <div className="space-y-2">
+        <div className="flex justify-between items-center">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Allocated Time</label>
+          <span className="text-xs font-black text-blue-500">
+            {hoursVal}h {minutesVal > 0 ? `${minutesVal}m` : ""} ({finalHours} hours)
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <input 
+            type="range"
+            min={0.25}
+            max={12}
+            step={0.25}
+            value={finalHours}
+            onChange={(e) => handleSliderChange(parseFloat(e.target.value) || 8)}
+            className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-zinc-200 dark:bg-zinc-800"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-zinc-400/80 uppercase tracking-wider">Hours</label>
+            <input 
+              type="number"
+              min={0}
+              max={12}
+              value={hoursVal}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(12, parseInt(e.target.value) || 0));
+                setHoursVal(val);
+              }}
+              className={cn(
+                "w-full px-3 py-2 rounded-xl border font-bold text-sm focus:outline-none focus:border-blue-500",
+                isDarkMode ? "bg-zinc-800 border-white/10 text-white" : "bg-zinc-50 border-zinc-200 text-zinc-800"
+              )}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-zinc-400/80 uppercase tracking-wider">Minutes</label>
+            <select
+              value={minutesVal}
+              onChange={(e) => setMinutesVal(parseInt(e.target.value) || 0)}
+              className={cn(
+                "w-full px-3 py-2.5 rounded-xl border font-bold text-sm focus:outline-none focus:border-blue-500",
+                isDarkMode ? "bg-zinc-800 border-white/10 text-white" : "bg-zinc-50 border-zinc-200 text-zinc-800"
+              )}
+            >
+              <option value={0}>0 min (:00)</option>
+              <option value={15}>15 min (:25)</option>
+              <option value={30}>30 min (:50)</option>
+              <option value={45}>45 min (:75)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Action */}
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => onSave(selectedSceneId, selectedType, finalHours, description)}
+          className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-500/20"
+        >
+          Confirm Allocation
+        </button>
       </div>
     </div>
   );
@@ -1513,9 +2597,8 @@ const ReferencesTab = ({ scenes, onUpdate, isDarkMode }: { scenes: Scene[], onUp
               <span className="mr-2" style={{ color: scene.color }}>{scene.id.toUpperCase()}</span>
               {scene.title}
             </h3>
-            {/* Thumbnail change disabled in demo */}
           </div>
-          
+
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className={cn("text-[10px] uppercase tracking-widest font-bold", isDarkMode ? "text-white/40" : "text-zinc-400")}>Ref Images</p>
@@ -1717,8 +2800,7 @@ const NodeEditor = ({ scene, onUpdateNodes, isDarkMode }: { scene: Scene, onUpda
   };
 
   const handleImageImport = () => {
-    const url = window.prompt('Enter Image URL:');
-    if (url) addNode('image', undefined, { src: url });
+    // Image import disabled in demo mode
   };
 
   return (
@@ -2089,17 +3171,7 @@ const NodeEditor = ({ scene, onUpdateNodes, isDarkMode }: { scene: Scene, onUpda
                             onChange={(e) => updateNode(node.id, { color: e.target.value })}
                           />
                         )}
-                        {node.type === 'image' && (
-                           <button 
-                             onClick={() => {
-                               const newUrl = window.prompt('Enter image URL:', node.src);
-                               if (newUrl) updateNode(node.id, { src: newUrl });
-                             }}
-                             className={cn("p-1.5 rounded-lg transition-colors", isDarkMode ? "hover:bg-white/10 text-white/60" : "hover:bg-zinc-100 text-zinc-600")}
-                           >
-                             <ImageIcon size={14} />
-                           </button>
-                        )}
+                        {/* Image URL edit disabled in demo */}
                         <button 
                           onClick={() => deleteSelected()}
                           className={cn("p-1.5 rounded-lg transition-colors", isDarkMode ? "hover:bg-red-500/20 text-red-400" : "hover:bg-red-50 text-red-600")}
@@ -2130,7 +3202,7 @@ const NodeEditor = ({ scene, onUpdateNodes, isDarkMode }: { scene: Scene, onUpda
   );
 };
 
-const SceneDetailView = ({ scene, onUpdate, isDarkMode }: { scene: Scene, onUpdate: (updated: Scene, originalId: string) => void, isDarkMode: boolean }) => {
+const SceneDetailView = ({ scene, onUpdate, isDarkMode, billingMode = 'project', assignments = {} }: { scene: Scene, onUpdate: (updated: Scene, originalId: string) => void, isDarkMode: boolean, billingMode?: 'project' | 'hourly', assignments?: Record<string, Assignment[]> }) => {
   const [detailMode, setDetailMode] = React.useState<'Overview' | 'NodeEditor'>('Overview');
   const [activeDetailTab, setActiveDetailTab] = React.useState<'History' | 'RenderPasses'>('History');
   const [isAddingNote, setIsAddingNote] = React.useState(false);
@@ -2346,64 +3418,6 @@ const SceneDetailView = ({ scene, onUpdate, isDarkMode }: { scene: Scene, onUpda
                 isDarkMode ? "border-white/10 bg-black" : "border-zinc-200 bg-white shadow-xl"
               )}>
                 <img src={scene.thumbnail} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                
-                {/* Thumbnail change disabled in demo */}
-
-                <AnimatePresence>
-                  {isEditingThumbnail && (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-8 space-y-6 z-50"
-                    >
-                      <button 
-                        onClick={() => setIsEditingThumbnail(false)}
-                        className="absolute top-4 right-4 p-2 text-white/40 hover:text-white transition-colors"
-                      >
-                        <X size={20} />
-                      </button>
-                      
-                      <div className="text-center space-y-2">
-                        <h3 className="text-white font-bold">Update Thumbnail</h3>
-                        <p className="text-white/40 text-[10px] uppercase tracking-widest">Link a URL or upload an image</p>
-                      </div>
-
-                      <div className="w-full max-w-xs space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Image URL</label>
-                          <input 
-                            autoFocus
-                            placeholder="https://..."
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-white/30 transition-all"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleThumbnailUrlSubmit((e.target as HTMLInputElement).value);
-                              }
-                            }}
-                          />
-                        </div>
-
-                        <div className="relative">
-                          <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-white/10"></div>
-                          </div>
-                          <div className="relative flex justify-center text-[10px] uppercase tracking-widest">
-                            <span className="bg-transparent px-2 text-white/20">or</span>
-                          </div>
-                        </div>
-
-                        <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-white/10 rounded-2xl cursor-pointer hover:bg-white/5 hover:border-white/20 transition-all group">
-                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                            <Download size={20} className="text-white/20 group-hover:text-white/40 transition-colors mb-2" />
-                            <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Upload File</p>
-                          </div>
-                          <input type="file" className="hidden" accept="image/*" onChange={handleThumbnailUpload} />
-                        </label>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
 
               {/* Detail Tabs */}
@@ -2677,14 +3691,31 @@ const SceneDetailView = ({ scene, onUpdate, isDarkMode }: { scene: Scene, onUpda
                   <p className={cn("text-xs break-all transition-colors", isDarkMode ? "text-white" : "text-zinc-600")}>{scene.renderFolder}</p>
                 </div>
                 <div className={cn("pt-4 border-t flex justify-between transition-colors", isDarkMode ? "border-white/5" : "border-zinc-100")}>
-                  <div className="text-center">
-                    <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Duration</p>
-                    <p className={cn("text-lg font-bold transition-colors", isDarkMode ? "text-white" : "text-zinc-900")}>{scene.duration}s</p>
-                  </div>
-                  <div className="text-center">
-                    <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Cost</p>
-                    <p className="text-lg font-bold text-green-400">${scene.cost}</p>
-                  </div>
+                  {billingMode === 'hourly' ? (
+                    <>
+                      <div className="text-center">
+                        <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Booked Hours</p>
+                        <p className={cn("text-lg font-bold font-sans", getCombinedBookedHours(scene, assignments) > getCombinedEstimatedHours(scene, assignments) ? "text-red-500 font-extrabold" : "text-amber-500")}>
+                          {getCombinedBookedHours(scene, assignments)}h
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Est. Hours</p>
+                        <p className="text-lg font-bold text-amber-500 font-sans">{getCombinedEstimatedHours(scene, assignments)}h</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-center">
+                        <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Duration</p>
+                        <p className={cn("text-lg font-bold transition-colors", isDarkMode ? "text-white" : "text-zinc-900")}>{scene.duration}s</p>
+                      </div>
+                      <div className="text-center">
+                        <p className={cn("text-[10px] uppercase font-bold transition-colors", isDarkMode ? "text-white/40" : "text-zinc-400")}>Cost</p>
+                        <p className="text-lg font-bold text-green-400">${scene.cost}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2798,21 +3829,43 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
     if (isDemo) return false;
     try {
       const saved = localStorage.getItem('soda-can-dark-mode');
-      return saved !== null ? JSON.parse(saved) : true;
+      return saved !== null ? JSON.parse(saved) : false;
     } catch (e) {
-      return true;
+      return false;
     }
   });
+
+  const [billingMode, setBillingMode] = React.useState<'project' | 'hourly'>(() => {
+    if (isDemo) return 'project';
+    try {
+      const saved = localStorage.getItem('soda-can-billing-mode');
+      return (saved as 'project' | 'hourly') || 'project';
+    } catch (e) {
+      return 'project';
+    }
+  });
+
+  React.useEffect(() => {
+    if (isDemo) return;
+    try {
+      localStorage.setItem('soda-can-billing-mode', billingMode);
+    } catch (e) {
+      console.error('Failed to save billing mode:', e);
+    }
+  }, [billingMode, isDemo]);
   const [scenes, setScenes] = React.useState<Scene[]>(() => {
     if (isDemo) return MOCK_SCENES.map(s => ({ ...s }));
     try {
       const saved = localStorage.getItem('soda-can-scenes');
-      if (!saved) return MOCK_SCENES;
-      const parsed = JSON.parse(saved) as Scene[];
-      return parsed.map(s => {
+      const baseScenes = saved ? (JSON.parse(saved) as Scene[]) : MOCK_SCENES;
+      return baseScenes.map(s => {
         const mock = MOCK_SCENES.find(m => m.id === s.id) || MOCK_SCENES[0];
+        const cleanedAssets = (s.assets || []).filter(
+          a => a.name.toLowerCase() !== "arm hair particles" && !a.name.toLowerCase().includes("arm hair")
+        );
         return {
           ...s,
+          assets: cleanedAssets,
           schedule: s.schedule || mock.schedule,
           budgetCategories: s.budgetCategories || mock.budgetCategories || []
         };
@@ -2821,6 +3874,106 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
       return MOCK_SCENES;
     }
   });
+
+  const [assignments, setAssignments] = React.useState<Record<string, Assignment[]>>(() => {
+    const saved = isDemo ? null : localStorage.getItem('soda-can-artist-assignments');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const migrated: Record<string, Assignment[]> = {};
+        Object.keys(parsed).forEach(key => {
+          const newKey = key.startsWith("Animator 3-") ? key.replace("Animator 3-", "Compositor 1-") : key;
+          const val = parsed[key];
+          if (Array.isArray(val)) {
+            migrated[newKey] = val.map((item: any, idx: number) => ({
+              id: (item.id || `${newKey}-${idx}-${Math.random()}`).replace("Animator 3-", "Compositor 1-"),
+              sceneId: item.sceneId,
+              hours: Number(item.hours),
+              type: item.type || '3D',
+              description: item.description || ''
+            }));
+          } else if (val && typeof val === 'object') {
+            migrated[newKey] = [{
+              id: (val.id || `${newKey}-${Math.random()}`).replace("Animator 3-", "Compositor 1-"),
+              sceneId: val.sceneId,
+              hours: Number(val.hours),
+              type: val.type || '3D',
+              description: val.description || ''
+            }];
+          }
+        });
+        if (Object.keys(migrated).length > 0) {
+          return migrated;
+        }
+      } catch (e) {
+        // Fallback below
+      }
+    }
+
+    // Default pre-populated assignments distributing scenes beautifully
+    const initial: Record<string, Assignment[]> = {};
+    const ARTISTS = ["Animator 1", "Animator 2", "Compositor 1"];
+    const artistCycles = [
+      // Animator 1
+      [
+        { range: [0, 4], sceneId: 'sc-1', type: '3D' as const, hours: 8, description: "3D scene assembly and camera block" },
+        { range: [5, 9], sceneId: 'sc-2', type: '3D' as const, hours: 8, description: "Lighting and material shader setup" },
+        { range: [10, 14], sceneId: 'sc-3', type: '3D' as const, hours: 8, description: "Fluid simulation and droplet rendering" },
+        { range: [15, 19], sceneId: 'sc-4', type: '3D' as const, hours: 8, description: "Can rotation keyframing and animation" },
+        { range: [20, 24], sceneId: 'sc-5', type: '3D' as const, hours: 8, description: "Beauty pass compositing and color grade" },
+        { range: [25, 29], sceneId: 'sc-5', type: 'Comp' as const, hours: 8, description: "Final export and audio sync" },
+      ],
+      // Animator 2
+      [
+        { range: [0, 4], sceneId: 'sc-2', type: '3D' as const, hours: 6, description: "Initial model adjustments" },
+        { range: [5, 9], sceneId: 'sc-1', type: 'Comp' as const, hours: 6, description: "Compositing setup and layering" },
+        { range: [10, 14], sceneId: 'sc-4', type: '3D' as const, hours: 8, description: "Rotoscoping and keying background" },
+        { range: [15, 19], sceneId: 'sc-3', type: 'Comp' as const, hours: 6, description: "Color matching and depth of field" },
+        { range: [20, 24], sceneId: 'sc-5', type: 'Comp' as const, hours: 8, description: "Multipass compounding" },
+        { range: [25, 29], sceneId: 'sc-3', type: 'Comp' as const, hours: 4, description: "Particle dust compositing" },
+      ],
+      // Compositor 1
+      [
+        { range: [0, 4], sceneId: 'sc-3', type: '3D' as const, hours: 8, description: "Droplet physics setups" },
+        { range: [5, 9], sceneId: 'sc-4', type: 'Comp' as const, hours: 6, description: "Tracking camera moves" },
+        { range: [10, 14], sceneId: 'sc-2', type: 'Comp' as const, hours: 6, description: "Matte paintings integration" },
+        { range: [15, 19], sceneId: 'sc-1', type: 'Comp' as const, hours: 6, description: "VFX overlay passes" },
+        { range: [20, 24], sceneId: 'sc-5', type: '3D' as const, hours: 6, description: "Model refinement" },
+        { range: [25, 29], sceneId: 'sc-4', type: 'Comp' as const, hours: 6, description: "Motion blur rendering" },
+      ]
+    ];
+
+    artistCycles.forEach((cycle, artistIdx) => {
+      const artistName = ARTISTS[artistIdx];
+      cycle.forEach(({ range: [start, end], sceneId, type, hours, description }) => {
+        for (let d = start; d <= end; d++) {
+          const key = `${artistName}-${d}`;
+          if (!initial[key]) {
+            initial[key] = [];
+          }
+          initial[key].push({
+            id: `${key}-${sceneId}-${type}-${Math.random()}`,
+            sceneId,
+            hours,
+            type,
+            description
+          });
+        }
+      });
+    });
+
+    return initial;
+  });
+
+  React.useEffect(() => {
+    if (isDemo) return;
+    try {
+      localStorage.setItem('soda-can-artist-assignments', JSON.stringify(assignments));
+    } catch (e) {
+      console.error('Failed to save artist assignments:', e);
+    }
+  }, [assignments, isDemo]);
+
   const [activeTab, setActiveTab] = React.useState<TabType>(() => {
     if (isDemo) return 'Project';
     try {
@@ -2850,6 +4003,7 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
   });
   const [isEditMode, setIsEditMode] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list' | 'timeline'>(() => {
+    if (isDemo) return 'grid';
     try {
       const saved = localStorage.getItem('soda-can-view-mode');
       return (saved as 'grid' | 'list' | 'timeline') || 'grid';
@@ -3151,27 +4305,18 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
 
         <div className="mt-auto flex flex-col items-center gap-4">
           <button
-            onClick={handleResetProject}
-            title="Reset Project"
+            onClick={() => { setActiveTab('Settings'); setActiveSceneId(null); }}
+            title="Settings"
             className={cn(
               "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300",
-              isDarkMode 
-                ? "bg-zinc-900 text-zinc-500 hover:bg-white/5 border border-white/5" 
-                : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 border border-zinc-200 shadow-sm"
+              activeTab === 'Settings'
+                ? (isDarkMode ? "bg-white/10 text-white" : "bg-blue-500 text-white shadow-lg shadow-blue-500/20")
+                : (isDarkMode 
+                    ? "bg-zinc-900 text-zinc-500 hover:text-white border border-white/5" 
+                    : "bg-zinc-100 text-zinc-400 hover:text-zinc-600 border border-zinc-200 shadow-sm")
             )}
           >
-            <RotateCcw size={20} />
-          </button>
-          <button
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300",
-              isDarkMode 
-                ? "bg-zinc-900 text-yellow-400 hover:bg-zinc-800 border border-white/5" 
-                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 shadow-sm"
-            )}
-          >
-            {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+            <Settings size={20} />
           </button>
           <div className={cn(
             "w-10 h-10 rounded-full overflow-hidden border transition-colors",
@@ -3256,6 +4401,8 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
                   scene={scenes.find(s => s.id === activeSceneId)!} 
                   onUpdate={updateScene}
                   isDarkMode={isDarkMode}
+                  billingMode={billingMode}
+                  assignments={assignments}
                 />
               </motion.div>
             ) : (
@@ -3324,12 +4471,43 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
                                 )}>
                                   30FPS
                                 </div>
-                                <div className={cn(
-                                  "px-4 py-1.5 border rounded-lg text-xs font-bold transition-colors",
-                                  isDarkMode ? "bg-green-500/10 border-green-500/30 text-green-400" : "bg-green-50 border-green-200 text-green-600 shadow-sm"
-                                )}>
-                                  ${totalProjectBudget.toLocaleString()}
-                                </div>
+                                {billingMode === 'hourly' ? (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <div className={cn(
+                                      "px-3 py-1.5 border rounded-xl text-xs font-bold transition-colors font-sans flex items-center gap-1",
+                                      isDarkMode ? "bg-blue-500/10 border-blue-500/30" : "bg-blue-50 border-blue-200 shadow-sm",
+                                      scenes.reduce((acc, s) => acc + get3DHours(s, assignments).booked, 0) > scenes.reduce((acc, s) => acc + get3DHours(s, assignments).est, 0)
+                                        ? "text-red-500 font-extrabold"
+                                        : "text-blue-500"
+                                    )}>
+                                      <span className="text-blue-500">3D:</span>
+                                      <span>{scenes.reduce((acc, s) => acc + get3DHours(s, assignments).booked, 0)}</span>
+                                      <span className="opacity-30 font-normal">|</span>
+                                      <span>{scenes.reduce((acc, s) => acc + get3DHours(s, assignments).est, 0)}h</span>
+                                    </div>
+                                    <div className={cn(
+                                      "px-3 py-1.5 border rounded-xl text-xs font-bold transition-colors font-sans flex items-center gap-1",
+                                      isDarkMode ? "bg-purple-500/10 border-purple-500/30" : "bg-purple-50 border-purple-200 shadow-sm",
+                                      scenes.reduce((acc, s) => acc + getCompHours(s, assignments).booked, 0) > scenes.reduce((acc, s) => acc + getCompHours(s, assignments).est, 0)
+                                        ? "text-red-500 font-extrabold"
+                                        : "text-purple-500"
+                                    )}>
+                                      <span className="text-purple-500">Comp:</span>
+                                      <span>{scenes.reduce((acc, s) => acc + getCompHours(s, assignments).booked, 0)}</span>
+                                      <span className="opacity-30 font-normal">|</span>
+                                      <span>{scenes.reduce((acc, s) => acc + getCompHours(s, assignments).est, 0)}h</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className={cn(
+                                    "px-4 py-1.5 border rounded-xl text-xs font-bold transition-colors",
+                                    isDarkMode 
+                                      ? "bg-green-500/10 border-green-500/30 text-green-400" 
+                                      : "bg-green-50 border-green-200 text-green-600 shadow-sm"
+                                  )}>
+                                    ${totalProjectBudget.toLocaleString()}
+                                  </div>
+                                )}
                                 <div className={cn(
                                   "px-4 py-1.5 border rounded-lg text-xs font-bold transition-colors",
                                   isDarkMode ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-blue-50 border-blue-200 text-blue-600 shadow-sm"
@@ -3521,6 +4699,8 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
                                     onDuplicate={() => duplicateScene(scene.id)}
                                     onDelete={() => setDeleteConfirmId(scene.id)}
                                     viewMode={viewMode}
+                                    billingMode={billingMode}
+                                    assignments={assignments}
                                   />
                                   
                                   {isEditMode && index < scenes.length - 1 && (
@@ -3576,9 +4756,22 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
                     />
                   </div>
                 )}
-                {activeTab === 'Budget' && <BudgetTab scenes={scenes} onUpdate={updateScene} isDarkMode={isDarkMode} />}
-                {activeTab === 'Schedule' && <ScheduleTab scenes={scenes} onUpdate={updateScene} isDarkMode={isDarkMode} />}
+                {activeTab === 'Budget' && (
+                  <BudgetTab 
+                    scenes={scenes} 
+                    onUpdate={updateScene} 
+                    isDarkMode={isDarkMode} 
+                    billingMode={billingMode} 
+                    setBillingMode={setBillingMode} 
+                    onAddScene={addSceneAtPosition}
+                    onDeleteScene={deleteScene}
+                    setScenes={setScenes}
+                    assignments={assignments}
+                  />
+                )}
+                {activeTab === 'Schedule' && <ScheduleTab scenes={scenes} onUpdate={updateScene} isDarkMode={isDarkMode} assignments={assignments} setAssignments={setAssignments} />}
                 {activeTab === 'References' && <ReferencesTab scenes={scenes} onUpdate={updateScene} isDarkMode={isDarkMode} />}
+                {activeTab === 'Settings' && <SettingsTab isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} billingMode={billingMode} setBillingMode={setBillingMode} onResetProject={handleResetProject} />}
               </motion.div>
             )}
           </AnimatePresence>
