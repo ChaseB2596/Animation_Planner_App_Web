@@ -9,6 +9,12 @@ export interface Scene {
   version: string;
   duration: number; // in seconds
   cost: number;
+  estimatedHours?: number;
+  bookedHours?: number;
+  estimatedHours3D?: number;
+  bookedHours3D?: number;
+  estimatedHoursComp?: number;
+  bookedHoursComp?: number;
   color: string;
   progress: {
     stage3D: number; // 0-100
@@ -40,7 +46,7 @@ export interface Scene {
     name: string;
     type: 'model' | 'texture' | 'sim' | 'other';
     cost?: number;
-    status?: 'purchase' | 'create' | 'existing';
+    status?: 'purchase' | 'create' | 'existing' | 'provided';
     sourceUrl?: string;
   }[];
   budgetCategories?: string[];
@@ -80,4 +86,13 @@ export interface EditorNode {
   toId?: string;
 }
 
-export type TabType = 'Project' | 'Budget' | 'Schedule' | 'References' | 'Nodes';
+export type TabType = 'Project' | 'Budget' | 'Schedule' | 'References' | 'Nodes' | 'Settings';
+
+export interface Assignment {
+  id: string;
+  sceneId: string;
+  hours: number;
+  type: '3D' | 'Comp';
+  description: string;
+}
+
