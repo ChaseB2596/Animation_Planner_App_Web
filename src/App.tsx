@@ -3836,7 +3836,7 @@ export default function App({ isDemo = false, onExitDemo }: { isDemo?: boolean; 
   });
 
   const [billingMode, setBillingMode] = React.useState<'project' | 'hourly'>(() => {
-    if (isDemo) return 'project';
+    if (isDemo) return 'hourly';
     try {
       const saved = localStorage.getItem('soda-can-billing-mode');
       return (saved as 'project' | 'hourly') || 'project';
